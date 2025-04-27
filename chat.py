@@ -1,50 +1,64 @@
+import os
+import time
 import socket
 import struct
-import time
 from uuid import uuid4 
 
-def iniciar_sockets(puerto=9990):
-    
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
-    udp_socket.bind(('0.0.0.0', puerto))
-    
-    tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp_socket.bind(('0.0.0.0', puerto))
-    tcp_socket.listen(5)
-    
-    print(f"[Red] Sockets UDP/TCP listos en puerto {puerto}")
-    return udp_socket, tcp_socket
+PUERTO = 9990
+BROADCAST_ADDR = '255.255.255.255'
 
-def generar_id_usuario():
-    """Genera un ID único de 20 bytes para este cliente"""
-    return uuid4().bytes[:20]
+MI_ID = os.urandom(20)  
+usuarios_conectados = {}  
 
-def enviar_echo(udp_socket, mi_id):
-    """Envía un mensaje de descubrimiento a toda la red (Operación 0)"""
+def iniciar_sockets():
+    """Configura y retorna los sockets UDP y TCP"""
+    try:
+        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
+        udp_socket.bind(('0.0.0.0', puerto))
+        
+        tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_socket.bind(('0.0.0.0', puerto))
+        tcp_socket.listen(5)
+        
+        print(f"[Red] Sockets UDP/TCP listos en puerto {puerto}")
+        return udp_socket, tcp_socket
+    
+    except Exception as e:
+        print(f"[Error] No se pudo iniciar sockets: {e}")
+        return None, None
+
+def enviar_echo(udp_socket):
+    """Envía mensaje de descubrimiento a toda la red"""
     header = struct.pack('!20s 20s B 59s',
-                        mi_id,                  
+                        MI_ID,                  
                         b'\xff'*20,             
                         0,                     
                         b'\x00'*59)             
     
-    udp_socket.sendto(header, ('255.255.255.255', 9990))
-    print(f"[Descubrimiento] Enviando Echo con ID {mi_id.hex()}")
+    udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
+    print(f"[Descubrimiento] Echo enviado con ID: {MI_ID.hex()}")
     
-def manejar_echo(udp_socket, data, addr, mi_id, usuarios):
-    id_origen = data[:20]
-    
-    if id_origen != mi_id:
-        usuarios[id_origen] = (addr[0], time.time())
+def manejar_echo(data, addr, udp_socket):
+    """Procesa mensajes de descubrimiento recibidos"""
+    try:
+        id_origen = data[:20]
+        
+        if id_origen == MI_ID:
+            return
+        
+        usuarios_conectados[id_origen] = (addr[0], time.time())
         print(f"[Descubrimiento] Usuario encontrado: {id_origen.hex()} desde {addr[0]}")
         
         respuesta = struct.pack('!B 20s 4s',
                                 0,              
-                                mi_id,          
+                                MI_ID,          
                                 b'\x00'*4)      
             
         udp_socket.sendto(respuesta, addr)
-        
+            
+    except Exception as e:
+        print(f"[Error] Al procesar Echo: {e}")
         
 if __name__ == "__main__":
     try:
