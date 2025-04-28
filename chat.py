@@ -376,7 +376,18 @@ def enviar_archivo_menu():
     except ValueError:
         print("Entrada inválida")
 
-
+def salir():
+    """Cierra la aplicación"""
+    
+    global tcp_server_running
+    
+    tcp_server_running = False
+    udp_socket.close()
+    tcp_socket.close()
+    
+    print("Saliendo del chat...")
+    
+    
 
 if __name__ == "__main__":
     try:
