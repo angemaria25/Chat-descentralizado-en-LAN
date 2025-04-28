@@ -38,6 +38,11 @@ def iniciar_sockets():
     except Exception as e:
         print(f"[Error] No se pudieron iniciar los sockets: {e}")
         raise
+    
+def iniciar_servicios():
+    """Inicia los hilos para los diferentes servicios"""
+    
+    threading.Thread(target=enviar_ecos_periodicos, daemon=True).start()
 
 ###########################################
 #Operación 0: Echo-Reply (Descubrimiento).
