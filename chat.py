@@ -389,6 +389,14 @@ def enviar_archivo_menu():
             
     except ValueError:
         print("Entrada inválida")
+        
+def ver_mensajes_recibidos():
+    """Muestra los mensajes recibidos"""
+    
+    print("\nMensajes recibidos:")
+    while not mensajes_recibidos.empty():
+        id_origen, mensaje = mensajes_recibidos.get()
+        print(f"De {id_origen.hex()}: {mensaje}")
 
 def salir():
     """Cierra la aplicación"""
