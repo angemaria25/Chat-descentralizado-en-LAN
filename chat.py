@@ -227,6 +227,38 @@ def enviar_archivo(id_destino, ruta_archivo):
         return False
 
 
+def manejar_archivo_recibido(tcp_conn, addr):
+    """Procesa un archivo entrante de otro usuario"""
+    
+    try:
+        file_id = int.from_bytes(tcp_conn.recv(8), 'big')
+        
+        print(f"[Archivo] Recibiendo archivo con ID {file_id}...")
+
+        nombre_archivo = f"recibido_{file_id}.dat"
+        with open(nombre_archivo, 'wb') as f:
+            while True:
+                data = tcp_conn.recv(4096)
+                if not data:
+                    break
+                f.write(data)
+                
+        print(f"[Archivo] Archivo recibido y guardado como {nombre_archivo}")
+        
+        respuesta = struct.pack('!B 20s 4s',
+                                0,              
+                                mi_id,          
+                                b'\x00'*4)      
+        
+        tcp_conn.sendall(respuesta)
+        tcp_conn.close()
+        
+        archivos_recibidos.put((addr[0], nombre_archivo))
+        
+    except Exception as e:
+        print(f"[Error] Al recibir archivo: {e}")
+        if 'tcp_conn' in locals():
+            tcp_conn.close()
 
 if __name__ == "__main__":
     try:
