@@ -41,6 +41,9 @@ def iniciar_sockets():
     
 def iniciar_servicios():
     """Inicia los hilos para los diferentes servicios"""
+    threading.Thread(target=recibir_mensajes_udp, daemon=True).start()
+    
+    threading.Thread(target=manejar_conexiones_tcp, daemon=True).start()
     
     threading.Thread(target=enviar_echos_periodicos, daemon=True).start()
 
