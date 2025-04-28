@@ -313,6 +313,17 @@ def menu():
         
         opcion = input("Seleccione una opción: ")
         
+        if opcion == "1":
+            listar_usuarios()
+        elif opcion == "2":
+            enviar_mensaje_menu()
+        elif opcion == "3":
+            enviar_archivo_menu()
+        elif opcion == "4":
+            salir()
+            break
+        else:
+            print("Opción inválida.")
 
 def listar_usuarios():
     """Muestra la lista de usuarios conectados"""
