@@ -42,7 +42,7 @@ def iniciar_sockets():
 ###########################################
 #Operación 0: Echo-Reply (Descubrimiento).
 ###########################################
-def enviar_echo(udp_socket):
+def enviar_echo():
     """Envía mensaje de descubrimiento a toda la red (broadcast)"""
     
     try:
@@ -59,7 +59,8 @@ def enviar_echo(udp_socket):
         
     except Exception as e:
         print(f"[Error] Al enviar echo: {e}")
-    
+
+
 def manejar_echo(data, addr):
     """Procesa mensajes de descubrimiento(echo) recibidos"""
     
@@ -84,6 +85,15 @@ def manejar_echo(data, addr):
     except Exception as e:
         print(f"[Error] Al procesar Echo: {e}")
         
+        
+def enviar_ecos_periodicos():
+    """Envía mensajes de descubrimiento periódicamente"""
+    
+    while True:
+        enviar_echo()
+        time.sleep(10)
+
+
 if __name__ == "__main__":
     try:
         udp_socket, tcp_socket = iniciar_sockets()
