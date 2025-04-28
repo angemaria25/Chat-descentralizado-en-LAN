@@ -25,14 +25,17 @@ def iniciar_sockets():
     
     try:
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
         udp_socket.bind(('0.0.0.0', PUERTO))
         
         tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tcp_socket.bind(('0.0.0.0', PUERTO))
         tcp_socket.listen(5)
         
         print(f"[Red] Sockets iniciados en puerto {PUERTO}")
+        print(f"Tu ID: {mi_id.hex()}")
         return udp_socket, tcp_socket
     
     except Exception as e:
@@ -397,8 +400,6 @@ def salir():
     tcp_socket.close()
     
     print("Saliendo del chat...")
-    
-    
 
 if __name__ == "__main__":
     try:
