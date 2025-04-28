@@ -171,6 +171,23 @@ def manejar_mensaje_recibido(data, addr):
     except Exception as e:
         print(f"[Error] Al procesar mensaje: {e}")
 
+########################################################
+#Operación 2: Send File-Ack (Transferencia de archivos).
+#########################################################
+def enviar_archivo(id_destino, ruta_archivo):
+    """Envía un archivo a otro usuario"""
+    
+    if id_destino not in usuarios_conectados:
+        print(f"[Error] Usuario {id_destino.hex()} no encontrado")
+        return False
+    
+    if not os.path.exists(ruta_archivo):
+        print(f"[Error] Archivo no encontrado: {ruta_archivo}")
+        return False
+    
+
+
+
 if __name__ == "__main__":
     try:
         udp_socket, tcp_socket = iniciar_sockets()
