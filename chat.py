@@ -70,7 +70,7 @@ def enviar_echo():
         print(f"[Error] Al enviar echo: {e}")
 
 
-def manejar_echo(data, addr):
+def manejar_echo_recibido(data, addr):
     """Procesa mensajes de descubrimiento(echo) recibidos"""
     
     try:
