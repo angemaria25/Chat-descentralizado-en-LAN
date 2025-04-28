@@ -15,8 +15,14 @@ mensajes_recibidos = Queue()
 archivos_recibidos = Queue()
 tcp_server_running = True
 
+udp_socket = None
+tcp_socket = None
+
 def iniciar_sockets():
     """Configura y retorna los sockets UDP y TCP"""
+    
+    global udp_socket, tcp_socket
+    
     try:
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
@@ -26,12 +32,12 @@ def iniciar_sockets():
         tcp_socket.bind(('0.0.0.0', PUERTO))
         tcp_socket.listen(5)
         
-        print(f"[Red] Sockets UDP/TCP listos en puerto {PUERTO}")
+        print(f"[Red] Sockets iniciados en puerto {PUERTO}")
         return udp_socket, tcp_socket
     
     except Exception as e:
-        print(f"[Error] No se pudo iniciar sockets: {e}")
-        return None, None
+        print(f"[Error] No se pudieron iniciar los sockets: {e}")
+        raise
 
 def enviar_echo(udp_socket):
     """Envía mensaje de descubrimiento a toda la red"""
