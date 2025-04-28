@@ -7,7 +7,9 @@ from queue import Queue
 
 PUERTO = 9990
 BROADCAST_ADDR = '255.255.255.255'
-TIMEOUT = 10
+HEADER_SIZE = 100
+RESPONSE_SIZE = 25
+TIMEOUT = 5
 
 mi_id = os.urandom(20)  
 usuarios_conectados = {}  
@@ -43,19 +45,18 @@ def iniciar_sockets():
         raise
     
 def iniciar_servicios():
-    """Inicia los hilos para los diferentes servicios"""
+    """Inicia los hilos para los diferentes servicios LCP"""
     
-    threading.Thread(target=recibir_mensajes_udp, daemon=True).start()
-    
-    threading.Thread(target=manejar_conexiones_tcp, daemon=True).start()
-    
+    threading.Thread(target=escuchar_udp, daemon=True).start()
+    threading.Thread(target=escuchar_tcp, daemon=True).start()
     threading.Thread(target=enviar_echos_periodicos, daemon=True).start()
+    threading.Thread(target=verificar_inactivos, daemon=True).start()
 
 ###########################################
 #Operación 0: Echo-Reply (Descubrimiento).
 ###########################################
 def enviar_echo():
-    """Envía mensaje de descubrimiento a toda la red (broadcast)"""
+    """Envía mensaje de descubrimiento a toda la red según LCP (Operación 0)"""
     
     try:
         header = struct.pack('!20s 20s B B 8s 50s',
@@ -67,101 +68,120 @@ def enviar_echo():
                             b'\x00'*50)             
         
         udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
-        print(f"[Descubrimiento] Echo enviado.")
         
     except Exception as e:
         print(f"[Error] Al enviar echo: {e}")
 
-def manejar_echo_recibido(data, addr):
-    """Procesa mensajes de descubrimiento(echo) recibidos"""
+def manejar_echo(data, addr):
+    """Procesa mensaje Echo recibido según LCP"""
     
     try:
-        id_origen = data[:20]
+        user_id_from = data[:20]
         
-        if id_origen == mi_id:
+        if user_id_from == mi_id:
             return
         
-        usuarios_conectados[id_origen] = (addr[0], time.time())
-        print(f"[Descubrimiento] Usuario encontrado: {id_origen.hex()} desde {addr[0]}")
+        usuarios_conectados[user_id_from] = (addr[0], time.time())
+        print(f"[LCP] Usuario descubierto: {user_id_from.hex()} desde {addr[0]}")
         
-        #Preparar respuesta (Reply)
         respuesta = struct.pack('!B 20s 4s',
                                 0,              
                                 mi_id,          
                                 b'\x00'*4)     
         
-        #Enviar respuesta al remitente original
         udp_socket.sendto(respuesta, addr)
             
     except Exception as e:
         print(f"[Error] Al procesar Echo: {e}")
         
-def enviar_echos_periodicos():
-    """Envía mensajes de descubrimiento periódicamente"""
+#def enviar_echos_periodicos():
+    #"""Envía mensajes de descubrimiento periódicamente"""
     
-    while True:
-        enviar_echo()
-        time.sleep(10)
+    #while True:
+        #enviar_echo()
+        #time.sleep(10)
 
 ################################
 #Operación 1: Message-Response.
 ################################
-def enviar_mensajes_texto(id_destino, mensaje):
-    """
-    Envía un mensaje de texto a otro usuario
-    Devuelve True si tuvo éxito, False si hubo error
-    """
+def enviar_mensajes_texto(user_id_to, mensaje):
+    """Envía un mensaje de texto según LCP (Operación 1)"""
     
-    if id_destino not in usuarios_conectados:
-        print(f"[Error] Usuario {id_destino.hex()} no encontrado")
+    if user_id_to not in usuarios_conectados:
+        print(f"[Error] Usuario {user_id_to.hex()} no encontrado")
         return False
     
     try:
-        ip_destino = usuarios_conectados[id_destino][0]
-        
-        mensaje_id = int(time.time() * 1000)
+        ip_destino = usuarios_conectados[user_id_to][0]
+        mensaje_bytes = mensaje.encode('utf-8')
+        mensaje_id = int(time.time() * 1000) % 256 #1 byte
         
         #Fase 1: Enviar header del mensaje.
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,     
-                            id_destino,
+                            user_id_to,
                             1,             
-                            mensaje_id % 256,     
-                            len(mensaje).to_bytes(8, 'big'),                
+                            mensaje_id,     
+                            len(mensaje_bytes).to_bytes(8, 'big'),                
                             b'\x00'*50)  
         
         udp_socket.sendto(header, (ip_destino, PUERTO))
         
-        print("[Mensaje] Header enviado, esperando confirmación...")
+        #Esperar respuesta según especificación
+        udp_socket.settimeout(TIMEOUT)
         
-        #Fase 2: Enviar cuerpo del mensaje.
-        cuerpo = struct.pack('!Q', mensaje_id) + mensaje.encode('utf-8')
-        udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
+        try:
+            respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
+            status = respuesta[0]
+            
+            if status != 0:  # 0 = OK 
+                print(f"[Error] Receptor reportó error: {status}")
+                return False
         
-        print(f"[Mensaje] Mensaje enviado a {id_destino.hex()}")
-        return True
-    
+        
+            #Fase 2: Enviar cuerpo del mensaje.
+            cuerpo = struct.pack('!Q', mensaje_id) + mensaje_bytes
+            udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
+            
+            #Esperar confirmación final
+            respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
+            status = respuesta[0]
+            
+            if status == 0:
+                print(f"[LCP] Mensaje enviado a {user_id_to.hex()}")
+                return True
+            else:
+                print(f"[Error] Confirmación fallida: {status}")
+                return False
+            
+        except socket.timeout:
+            print("[Error] Tiempo de espera agotado")
+            return False
+        finally:
+            udp_socket.settimeout(None)
+            
     except Exception as e:
         print(f"[Error] Al enviar mensaje: {e}")
         return False
+            
+            
     
-def manejar_mensaje_recibido(data, addr):
-    """Procesa un mensaje de texto recibido"""
+def manejar_mensaje(data, addr):
+    """Procesa mensaje recibido"""
     
     try:
-        id_origen = data[:20]
-        id_destino = data[20:40]
-        operation_code = data[40]
+        user_id_from = data[:20]
+        user_id_to = data[20:40]
+        operation = data[40]
         body_id = data[41]
         body_length = int.from_bytes(data[42:50], 'big')
         
-        if id_destino != mi_id and id_destino != b'\xff'*20:
+        if user_id_to != mi_id and user_id_to != b'\xff'*20:
             return
         
-        usuarios_conectados[id_origen] = (addr[0], time.time())
+        usuarios_conectados[user_id_from] = (addr[0], time.time())
         
         if operation_code == 1: 
-            #Enviar confirmación de header recibido
             respuesta = struct.pack('!B 20s 4s',
                                     0,              
                                     mi_id,          
@@ -169,152 +189,245 @@ def manejar_mensaje_recibido(data, addr):
             
             udp_socket.sendto(respuesta, addr)
             
-            mensaje = "(Contenido del mensaje no implementado)"
-            mensajes_recibidos.put((id_origen, mensaje))
-            print(f"[Mensaje] Mensaje recibido de {id_origen.hex()}")
+            # Recibir cuerpo del mensaje
+            udp_socket.settimeout(TIMEOUT)
             
+            try:
+                cuerpo_data, _ = udp_socket.recvfrom(body_length + 8) 
+                
+                recibido_id = struct.unpack('!Q', cuerpo_data[:8])[0]
+                if (recibido_id % 256) != body_id:
+                    print("[Error] ID de mensaje no coincide")
+                    return
+                
+                mensaje = cuerpo_data[8:].decode('utf-8')
+                timestamp = time.strftime("%H:%M:%S")
+                mensajes_recibidos.put((user_id_from, timestamp, mensaje))
+                
+                print(f"\n[LCP] Mensaje de {user_id_from.hex()}: {mensaje}\n> ", end="")
+            
+                confirmacion = struct.pack('!B 20s 4s',
+                                            0,         
+                                            mi_id,
+                                            b'\x00'*4)
+                
+                udp_socket.sendto(confirmacion, addr)
+                
+            except socket.timeout:
+                print("[Error] Tiempo de espera para cuerpo del mensaje")
+            finally:
+                udp_socket.settimeout(None)
+                
     except Exception as e:
         print(f"[Error] Al procesar mensaje: {e}")
 
 ########################################################
 #Operación 2: Send File-Ack (Transferencia de archivos).
 #########################################################
-def enviar_archivo(id_destino, ruta_archivo):
+def enviar_archivo(user_id_to, filepath):
     """Envía un archivo a otro usuario"""
     
-    if id_destino not in usuarios_conectados:
-        print(f"[Error] Usuario {id_destino.hex()} no encontrado")
+    if user_id_to not in usuarios_conectados:
+        print(f"[Error] Usuario {user_id_to.hex()} no encontrado")
         return False
     
-    if not os.path.exists(ruta_archivo):
-        print(f"[Error] Archivo no encontrado: {ruta_archivo}")
+    if not os.path.exists(filepath):
+        print(f"[Error] Archivo no encontrado: {filepath}")
         return False
     
     try:
-        ip_destino = usuarios_conectados[id_destino][0]
+        ip_destino = usuarios_conectados[user_id_to][0]
+        file_size = os.path.getsize(filepath)
+        file_id = int(time.time() * 1000) % 256
         
-        file_id = int(time.time() * 1000)
-        file_size = os.path.getsize(ruta_archivo)
         
         #Fase 1: Enviar header por UDP.
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,                 
-                            id_destino,            
+                            user_id_to,            
                             2,                     
-                            file_id % 256,         
+                            file_id,         
                             file_size.to_bytes(8, 'big'),  
                             b'\x00'*50)           
         
         udp_socket.sendto(header, (ip_destino, PUERTO))
-        print("[Archivo] Header enviado, esperando confirmación...")
         
-        #Fase 2: Enviar archivo por TCP.
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_send_socket:
-            tcp_send_socket.connect((ip_destino, PUERTO))
+        #Esperar respuesta UDP según LCP
+        udp_socket.settimeout(TIMEOUT)
+        
+        try:
+            respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
+            status = respuesta[0]
             
-            # Enviar ID de archivo y contenido
-            with open(ruta_archivo, 'rb') as f:
-                tcp_send_socket.sendall(file_id.to_bytes(8, 'big'))
+            if status != 0:
+                print(f"[Error] Receptor reportó error: {status}")
+                return False
+            
+            #Fase 2: Enviar archivo por TCP.
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_send_socket:
+                tcp_send_socket.settimeout(TIMEOUT * 3) #Más tiempo para archivos
+                tcp_send_socket.connect((ip_destino, PUERTO))
                 
-                while True:
-                    data = f.read(4096)
-                    if not data:
-                        break
-                    tcp_send_socket.sendall(data)
+                #Enviar ID de archivo y contenido
+                with open(filepath, 'rb') as f:
+                    tcp_send_socket.sendall(file_id.to_bytes(8, 'big'))
+                    
+                    #Enviar archivo en chunks
+                    total_sent = 0
+                    while True:
+                        chunk = f.read(4096)
+                        if not chunk:
+                            break
+                        tcp_send_socket.sendall(chunk)
+                        total_sent += len(chunk)
+                        print(f"\r[LCP] Enviados {total_sent/1024:.1f}KB/{file_size/1024:.1f}KB", end="")
+                
+                #Esperar confirmación final por TCP
+                confirmacion = tcp_send_socket.recv(RESPONSE_SIZE)
+                status = confirmacion[0]
+                
+                if status == 0:
+                    print(f"\n[LCP] Archivo enviado a {user_id_to.hex()}")
+                    return True
+                else:
+                    print(f"\n[Error] Confirmación fallida: {status}")
+                    return False
+                
+                
+        except socket.timeout:
+            print("[Error] Tiempo de espera agotado")
+            return False
+        finally:
+            udp_socket.settimeout(None)   
             
-            print("[Archivo] Archivo enviado, esperando confirmación...")
-            
-        print(f"[Archivo] Archivo {ruta_archivo} enviado a {id_destino.hex()}")
-        return True
-    
     except Exception as e:
         print(f"[Error] Al enviar archivo: {e}")
         return False
 
 
-def manejar_archivo_recibido(tcp_conn, addr):
+def manejar_archivo(tcp_conn, addr):
     """Procesa un archivo entrante de otro usuario"""
     
     try:
-        file_id = int.from_bytes(tcp_conn.recv(8), 'big')
+        tcp_conn.settimeout(TIMEOUT * 3)  #Más tiempo para archivos
         
-        print(f"[Archivo] Recibiendo archivo con ID {file_id}...")
-
-        nombre_archivo = f"recibido_{file_id}.dat"
-        with open(nombre_archivo, 'wb') as f:
+        #Recibir ID de archivo (8 bytes)
+        file_id_data = tcp_conn.recv(8)
+        
+        if len(file_id_data) != 8:
+            raise ValueError("ID de archivo incompleto")
+        
+        file_id = int.from_bytes(file_id_data, 'big')
+        
+        #Crear directorio para archivos recibidos
+        os.makedirs("archivos_recibidos", exist_ok=True)
+        filename = f"archivos_recibidos/{file_id}_{int(time.time())}.dat"
+        
+        #Recibir archivo
+        with open(filename, 'wb') as f:
+            total_recibido = 0
             while True:
                 data = tcp_conn.recv(4096)
                 if not data:
                     break
                 f.write(data)
-                
-        print(f"[Archivo] Archivo recibido y guardado como {nombre_archivo}")
+                total_recibido += len(data)
+                print(f"\r[LCP] Recibidos {total_recibido/1024:.1f}KB", end="")
         
+        print(f"\n[LCP] Archivo guardado como {filename}")
+        
+        #Enviar confirmación por TCP 
         respuesta = struct.pack('!B 20s 4s',
                                 0,              
-                                mi_id,          
-                                b'\x00'*4)      
-        
+                                mi_id,
+                                b'\x00'*4)
+            
         tcp_conn.sendall(respuesta)
         tcp_conn.close()
         
-        archivos_recibidos.put((addr[0], nombre_archivo))
+        archivos_recibidos.put((addr[0], filename))
         
     except Exception as e:
         print(f"[Error] Al recibir archivo: {e}")
         if 'tcp_conn' in locals():
+            respuesta = struct.pack('!B 20s 4s',
+                                    2,          
+                                    mi_id,
+                                    b'\x00'*4)
+            tcp_conn.sendall(respuesta)
             tcp_conn.close()
 
-###################           
-#Funciones útiles. 
-##################
-def recibir_mensajes_udp():
+##############################           
+#Funciones de red principales. 
+###############################
+def escuchar_udp():
     """Escucha mensajes UDP entrantes en un bucle infinito"""
     
     while True:
         try:
-            data, addr = udp_socket.recvfrom(1024)
+            data, addr = udp_socket.recvfrom(HEADER_SIZE)
             
             #El header mínimo tiene 41 bytes (los otros campos son opcionales)
             if len(data) >= 41:
-                operation_code = data[40]
+                operation = data[40]
                 
-                if operation_code == 0:   
-                    manejar_echo_recibido(data, addr)
-                elif operation_code == 1:  
-                    manejar_mensaje_recibido(data, addr)
-                elif operation_code == 2:   
-                    print("[Archivo] Header de archivo recibido")
+                if operation_code == 0:    #Echo
+                    manejar_echo(data, addr)
+                elif operation_code == 1:  #Mensaje
+                    manejar_mensaje(data, addr)
+                elif operation_code == 2:   #File
+                    print("[LCP] Header de archivo recibido")
                 
         except Exception as e:
             print(f"[Error] Al recibir mensaje UDP: {e}")
 
-
-def manejar_conexiones_tcp():
-    """Acepta conexiones TCP entrantes para transferencia de archivos"""
+def escuchar_tcp():
+    """Acepta conexiones TCP para transferencia de archivos"""
     
     while tcp_server_running:
         try:
             conn, addr = tcp_socket.accept()
-            threading.Thread(target=manejar_archivo_recibido, args=(conn, addr)).start()
+            threading.Thread(target=manejar_archivo, args=(conn, addr)).start()
         except Exception as e:
             if tcp_server_running:
                 print(f"[Error] En conexión TCP: {e}")
 
+def verificar_inactivos():
+    """Elimina usuarios inactivos según timeout"""
+    
+    while True:
+        time.sleep(10)
+        ahora = time.time()
+        inactivos = [uid for uid, (_, last) in usuarios_conectados.items() 
+                    if ahora - last > TIMEOUT * 3]
+        
+        for uid in inactivos:
+            print(f"[LCP] Usuario {uid.hex()} eliminado por inactividad")
+            del usuarios_conectados[uid]
 
+def enviar_echos_periodicos():
+    """Envía mensajes Echo periódicamente para descubrimiento"""
+    
+    while True:
+        enviar_echo()
+        time.sleep(15)
+
+#######################
+# Interfaz de usuario.
+#######################
 def mostrar_menu():
     """Muestra el menú principal y maneja las opciones"""
     
     while True:
-        print("\n--- Chat LAN ---")
-        print("1. Listar usuarios conectados")
+        print("\n--- Chat LCP ---")
+        print("1. Listar usuarios")
         print("2. Enviar mensaje")
         print("3. Enviar archivo")
-        print("4. Ver mensajes recibidos")
-        print("5. Ver archivos recibidos")
+        print("4. Ver mensajes")
+        print("5. Ver archivos")
         print("6. Salir")
         
-        opcion = input("Seleccione una opción: ")
+        opcion = input("Seleccione: ")
         
         if opcion == "1":
             listar_usuarios()
@@ -323,45 +436,46 @@ def mostrar_menu():
         elif opcion == "3":
             enviar_archivo_menu()
         elif opcion == "4":
-            ver_mensajes_recibidos()
+            ver_mensajes()
         elif opcion == "5":
-            ver_archivos_recibidos()
+            ver_archivos()
         elif opcion == "6":
             salir()
             break
         else:
-            print("Opción no válida")
+            print("Opción inválida")
             
 def listar_usuarios():
-    """Muestra la lista de usuarios conectados"""
+    """Lista de usuarios conectados"""
     
     print("\nUsuarios conectados:")
     if not usuarios_conectados:
         print("No hay otros usuarios conectados")
         return
     
-    for i, (user_id, (ip, _)) in enumerate(usuarios_conectados.items(), 1):
-        print(f"{i}. ID: {user_id.hex()} | IP: {ip}")
-
+    for i, (uid, (ip, last)) in enumerate(usuarios_conectados.items(), 1):
+        inactivo = int(time.time() - last)
+        print(f"{i}. ID: {uid.hex()[:8]}... | IP: {ip} | Inactivo: {inactivo}s")
+    
 
 def enviar_mensaje_menu():
-    """Enviar mensajes a otros usuarios"""
+    """Interfaz para enviar mensajes"""
     
     if not usuarios_conectados:
         print("No hay usuarios conectados")
         return
         
-    print("\nSeleccione un usuario:")
-    usuarios = list(usuarios_conectados.keys())
-    for i, user_id in enumerate(usuarios, 1):
-        print(f"{i}. {user_id.hex()}")
+    print("\nSeleccione usuario:")
+    usuarios = list(usuarios_conectados.items())
+    for i, (uid, _) in enumerate(usuarios, 1):
+        print(f"{i}. {uid.hex()[:8]}...")
 
     try:
-        seleccion = int(input("Número de usuario: ")) - 1
+        seleccion = int(input("Número: ")) - 1
         if 0 <= seleccion < len(usuarios):
             mensaje = input("Mensaje: ")
-            if enviar_mensaje_texto(usuarios[seleccion], mensaje):
-                print("Mensaje enviado con éxito")
+            if enviar_mensaje(usuarios[seleccion][0], mensaje):
+                print("Mensaje enviado")
             else:
                 print("Error al enviar mensaje")
         else:
@@ -371,20 +485,21 @@ def enviar_mensaje_menu():
 
 def enviar_archivo_menu():
     """Interfaz para enviar archivos"""
+    
     if not usuarios_conectados:
         print("No hay usuarios conectados")
         return
         
-    print("\nSeleccione un usuario:")
-    usuarios = list(usuarios_conectados.keys())
-    for i, user_id in enumerate(usuarios, 1):
-        print(f"{i}. {user_id.hex()}")
+    print("\nSeleccione usuario:")
+    usuarios = list(usuarios_conectados.items())
+    for i, (uid, _) in enumerate(usuarios, 1):
+        print(f"{i}. {uid.hex()[:8]}...")
     
     try:
-        seleccion = int(input("Número de usuario: ")) - 1
+        seleccion = int(input("Número: ")) - 1
         if 0 <= seleccion < len(usuarios):
             ruta = input("Ruta del archivo: ")
-            if enviar_archivo(usuarios[seleccion], ruta):
+            if enviar_archivo(usuarios[seleccion][0], ruta):
                 print("Archivo enviado con éxito")
             else:
                 print("Error al enviar archivo")
@@ -394,23 +509,23 @@ def enviar_archivo_menu():
     except ValueError:
         print("Entrada inválida")
         
-def ver_mensajes_recibidos():
-    """Muestra los mensajes recibidos"""
+def ver_mensajes():
+    """Muestra mensajes recibidos"""
     
     print("\nMensajes recibidos:")
     
     while not mensajes_recibidos.empty():
-        id_origen, mensaje = mensajes_recibidos.get()
-        print(f"De {id_origen.hex()}: {mensaje}")
-
-def ver_archivos_recibidos():
-    """Muestra los archivos recibidos"""
+        uid, hora,  msg = mensajes_recibidos.get()
+        print(f"{hora} - {uid.hex()[:8]}...: {msg}")
+        
+def ver_archivos():
+    """Muestra archivos recibidos"""
     
     print("\nArchivos recibidos:")
     
     while not archivos_recibidos.empty():
-        ip_origen, nombre_archivo = archivos_recibidos.get()
-        print(f"De {ip_origen}: {nombre_archivo}")
+        ip, filename = archivos_recibidos.get()
+        print(f"De {ip}: {filename} ({os.path.getsize(filename)/1024:.1f} KB)")
 
 def salir():
     """Cierra la aplicación"""
@@ -418,20 +533,26 @@ def salir():
     global tcp_server_running
     
     tcp_server_running = False
-    if udp_socket:
-        udp_socket.close()
-    if tcp_listener:
-        tcp_listener.close()
-    print("Saliendo del chat...")
     
+    if udp_socket: 
+        udp_socket.close()
+        
+    if tcp_socket: 
+        tcp_socket.close()
+    
+    print("Saliendo...")
+
 if __name__ == "__main__":
     try:
-        print("Iniciando chat descentralizado en LAN...")
+        print("Iniciando cliente LCP...")
         
         iniciar_sockets()
         iniciar_servicios()
         mostrar_menu()
-
+        
+    except KeyboardInterrupt:
+        print("\nInterrumpido por usuario")
+        
     except Exception as e:
         print(f"Error fatal: {e}")
     finally:
