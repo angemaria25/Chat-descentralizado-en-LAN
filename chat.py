@@ -72,7 +72,6 @@ def enviar_echo():
     except Exception as e:
         print(f"[Error] Al enviar echo: {e}")
 
-
 def manejar_echo_recibido(data, addr):
     """Procesa mensajes de descubrimiento(echo) recibidos"""
     
@@ -96,7 +95,6 @@ def manejar_echo_recibido(data, addr):
             
     except Exception as e:
         print(f"[Error] Al procesar Echo: {e}")
-        
         
 def enviar_echos_periodicos():
     """Envía mensajes de descubrimiento periódicamente"""
@@ -420,11 +418,12 @@ def salir():
     global tcp_server_running
     
     tcp_server_running = False
-    udp_socket.close()
-    tcp_socket.close()
-    
+    if udp_socket:
+        udp_socket.close()
+    if tcp_listener:
+        tcp_listener.close()
     print("Saliendo del chat...")
-
+    
 if __name__ == "__main__":
     try:
         print("Iniciando chat descentralizado en LAN...")
@@ -435,4 +434,5 @@ if __name__ == "__main__":
 
     except Exception as e:
         print(f"Error fatal: {e}")
+    finally:
         salir()
