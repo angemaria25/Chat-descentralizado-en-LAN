@@ -41,6 +41,7 @@ def iniciar_sockets():
     
 def iniciar_servicios():
     """Inicia los hilos para los diferentes servicios"""
+    
     threading.Thread(target=recibir_mensajes_udp, daemon=True).start()
     
     threading.Thread(target=manejar_conexiones_tcp, daemon=True).start()
@@ -298,6 +299,28 @@ def manejar_conexiones_tcp():
         except Exception as e:
             if tcp_server_running:
                 print(f"[Error] En conexión TCP: {e}")
+
+
+def menu():
+    """Muestra el menú principal y maneja las opciones"""
+    
+    while True:
+        print("\n--- Chat LAN ---")
+        print("1. Listar usuarios conectados")
+        print("2. Enviar mensaje")
+        print("3. Enviar archivo")
+        print("4. Salir")
+        
+        opcion = input("Seleccione una opción: ")
+        
+
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     try:
