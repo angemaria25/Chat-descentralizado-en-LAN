@@ -394,9 +394,19 @@ def ver_mensajes_recibidos():
     """Muestra los mensajes recibidos"""
     
     print("\nMensajes recibidos:")
+    
     while not mensajes_recibidos.empty():
         id_origen, mensaje = mensajes_recibidos.get()
         print(f"De {id_origen.hex()}: {mensaje}")
+
+def ver_archivos_recibidos():
+    """Muestra los archivos recibidos"""
+    
+    print("\nArchivos recibidos:")
+    
+    while not archivos_recibidos.empty():
+        ip_origen, nombre_archivo = archivos_recibidos.get()
+        print(f"De {ip_origen}: {nombre_archivo}")
 
 def salir():
     """Cierra la aplicación"""
