@@ -60,22 +60,25 @@ def enviar_echo(udp_socket):
     except Exception as e:
         print(f"[Error] Al enviar echo: {e}")
     
-def manejar_echo(data, addr, udp_socket):
-    """Procesa mensajes de descubrimiento recibidos"""
+def manejar_echo(data, addr):
+    """Procesa mensajes de descubrimiento(echo) recibidos"""
+    
     try:
         id_origen = data[:20]
         
-        if id_origen == MI_ID:
+        if id_origen == mi_id:
             return
         
         usuarios_conectados[id_origen] = (addr[0], time.time())
         print(f"[Descubrimiento] Usuario encontrado: {id_origen.hex()} desde {addr[0]}")
         
+        #Preparar respuesta (Reply)
         respuesta = struct.pack('!B 20s 4s',
                                 0,              
-                                MI_ID,          
-                                b'\x00'*4)      
-            
+                                mi_id,          
+                                b'\x00'*4)     
+        
+        #Enviar respuesta al remitente original
         udp_socket.sendto(respuesta, addr)
             
     except Exception as e:
