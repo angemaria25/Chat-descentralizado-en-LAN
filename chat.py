@@ -185,6 +185,46 @@ def enviar_archivo(id_destino, ruta_archivo):
         print(f"[Error] Archivo no encontrado: {ruta_archivo}")
         return False
     
+    try:
+        ip_destino = usuarios_conectados[id_destino][0]
+        
+        file_id = int(time.time() * 1000)
+        file_size = os.path.getsize(ruta_archivo)
+        
+        #Fase 1: Enviar header por UDP.
+        header = struct.pack('!20s 20s B B 8s 50s',
+                            mi_id,                 
+                            id_destino,            
+                            2,                     
+                            file_id % 256,         
+                            file_size.to_bytes(8, 'big'),  
+                            b'\x00'*50)           
+        
+        udp_socket.sendto(header, (ip_destino, PUERTO))
+        print("[Archivo] Header enviado, esperando confirmación...")
+        
+        #Fase 2: Enviar archivo por TCP.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_send_socket:
+            tcp_send_socket.connect((ip_destino, PUERTO))
+            
+            # Enviar ID de archivo y contenido
+            with open(ruta_archivo, 'rb') as f:
+                tcp_send_socket.sendall(file_id.to_bytes(8, 'big'))
+                
+                while True:
+                    data = f.read(4096)
+                    if not data:
+                        break
+                    tcp_send_socket.sendall(data)
+            
+            print("[Archivo] Archivo enviado, esperando confirmación...")
+            
+        print(f"[Archivo] Archivo {ruta_archivo} enviado a {id_destino.hex()}")
+        return True
+    
+    except Exception as e:
+        print(f"[Error] Al enviar archivo: {e}")
+        return False
 
 
 
