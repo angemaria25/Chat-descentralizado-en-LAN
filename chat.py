@@ -39,16 +39,26 @@ def iniciar_sockets():
         print(f"[Error] No se pudieron iniciar los sockets: {e}")
         raise
 
+###########################################
+#Operación 0: Echo-Reply (Descubrimiento).
+###########################################
 def enviar_echo(udp_socket):
-    """Envía mensaje de descubrimiento a toda la red"""
-    header = struct.pack('!20s 20s B 59s',
-                        MI_ID,                  
-                        b'\xff'*20,             
-                        0,                     
-                        b'\x00'*59)             
+    """Envía mensaje de descubrimiento a toda la red (broadcast)"""
     
-    udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
-    print(f"[Descubrimiento] Echo enviado con ID: {MI_ID.hex()}")
+    try:
+        header = struct.pack('!20s 20s B B 8S 50s',
+                            mi_id,     
+                            b'\xff'*20,
+                            0,             
+                            0,     
+                            b'\x00'*8,                
+                            b'\x00'*50)             
+        
+        udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
+        print(f"[Descubrimiento] Echo enviado.")
+        
+    except Exception as e:
+        print(f"[Error] Al enviar echo: {e}")
     
 def manejar_echo(data, addr, udp_socket):
     """Procesa mensajes de descubrimiento recibidos"""
