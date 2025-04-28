@@ -2,26 +2,31 @@ import os
 import time
 import socket
 import struct
-from uuid import uuid4 
+import threading 
+from queue import Queue 
 
 PUERTO = 9990
 BROADCAST_ADDR = '255.255.255.255'
+TIMEOUT = 10
 
-MI_ID = os.urandom(20)  
+mi_id = os.urandom(20)  
 usuarios_conectados = {}  
+mensajes_recibidos = Queue()
+archivos_recibidos = Queue()
+tcp_server_running = True
 
 def iniciar_sockets():
     """Configura y retorna los sockets UDP y TCP"""
     try:
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
-        udp_socket.bind(('0.0.0.0', puerto))
+        udp_socket.bind(('0.0.0.0', PUERTO))
         
         tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        tcp_socket.bind(('0.0.0.0', puerto))
+        tcp_socket.bind(('0.0.0.0', PUERTO))
         tcp_socket.listen(5)
         
-        print(f"[Red] Sockets UDP/TCP listos en puerto {puerto}")
+        print(f"[Red] Sockets UDP/TCP listos en puerto {PUERTO}")
         return udp_socket, tcp_socket
     
     except Exception as e:
