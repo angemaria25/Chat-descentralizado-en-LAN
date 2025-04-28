@@ -314,11 +314,67 @@ def menu():
         opcion = input("Seleccione una opción: ")
         
 
+def listar_usuarios():
+    """Muestra la lista de usuarios conectados"""
+    
+    print("\nUsuarios conectados:")
+    if not usuarios_conectados:
+        print("No hay otros usuarios conectados")
+        return
+    
+    for i, (user_id, (ip, _)) in enumerate(usuarios_conectados.items(), 1):
+        print(f"{i}. ID: {user_id.hex()} | IP: {ip}")
 
 
+def enviar_mensaje_menu():
+    """Enviar mensajes a otros usuarios"""
+    
+    if not usuarios_conectados:
+        print("No hay usuarios conectados")
+        return
+        
+    print("\nSeleccione un usuario:")
+    usuarios = list(usuarios_conectados.keys())
+    for i, user_id in enumerate(usuarios, 1):
+        print(f"{i}. {user_id.hex()}")
 
+    try:
+        seleccion = int(input("Número de usuario: ")) - 1
+        if 0 <= seleccion < len(usuarios):
+            mensaje = input("Mensaje: ")
+            if enviar_mensaje_texto(usuarios[seleccion], mensaje):
+                print("Mensaje enviado con éxito")
+            else:
+                print("Error al enviar mensaje")
+        else:
+            print("Selección inválida")
+    except ValueError:
+        print("Entrada inválida")
 
-
+def enviar_archivo_menu():
+    """Interfaz para enviar archivos"""
+    if not usuarios_conectados:
+        print("No hay usuarios conectados")
+        return
+        
+    print("\nSeleccione un usuario:")
+    usuarios = list(usuarios_conectados.keys())
+    for i, user_id in enumerate(usuarios, 1):
+        print(f"{i}. {user_id.hex()}")
+    
+    try:
+        seleccion = int(input("Número de usuario: ")) - 1
+        if 0 <= seleccion < len(usuarios):
+            ruta = input("Ruta del archivo: ")
+            if enviar_archivo(usuarios[seleccion], ruta):
+                print("Archivo enviado con éxito")
+            else:
+                print("Error al enviar archivo")
+        else:
+            print("Selección inválida")
+            
+    except ValueError:
+        print("Entrada inválida")
 
 
 
