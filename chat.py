@@ -141,6 +141,7 @@ def enviar_mensajes_texto(id_destino, mensaje):
         return False
     
 
+
 if __name__ == "__main__":
     try:
         udp_socket, tcp_socket = iniciar_sockets()
