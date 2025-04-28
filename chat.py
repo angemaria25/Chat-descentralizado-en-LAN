@@ -301,7 +301,7 @@ def manejar_conexiones_tcp():
                 print(f"[Error] En conexión TCP: {e}")
 
 
-def menu():
+def mostrar_menu():
     """Muestra el menú principal y maneja las opciones"""
     
     while True:
