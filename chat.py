@@ -260,6 +260,42 @@ def manejar_archivo_recibido(tcp_conn, addr):
         if 'tcp_conn' in locals():
             tcp_conn.close()
 
+###################           
+#Funciones útiles. 
+##################
+def recibir_mensajes_udp():
+    """Escucha mensajes UDP entrantes en un bucle infinito"""
+    
+    while True:
+        try:
+            data, addr = udp_socket.recvfrom(1024)
+            
+            #El header mínimo tiene 41 bytes (los otros campos son opcionales)
+            if len(data) >= 41:
+                operation_code = data[40]
+                
+                if operation_code == 0:   
+                    manejar_echo_recibido(data, addr)
+                elif operation_code == 1:  
+                    manejar_mensaje_recibido(data, addr)
+                elif operation_code == 2:   
+                    print("[Archivo] Header de archivo recibido")
+                
+        except Exception as e:
+            print(f"[Error] Al recibir mensaje UDP: {e}")
+
+
+def manejar_conexiones_tcp():
+    """Acepta conexiones TCP entrantes para transferencia de archivos"""
+    
+    while tcp_server_running:
+        try:
+            conn, addr = tcp_socket.accept()
+            threading.Thread(target=manejar_archivo_recibido, args=(conn, addr)).start()
+        except Exception as e:
+            if tcp_server_running:
+                print(f"[Error] En conexión TCP: {e}")
+
 if __name__ == "__main__":
     try:
         udp_socket, tcp_socket = iniciar_sockets()
