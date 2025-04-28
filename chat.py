@@ -312,7 +312,9 @@ def mostrar_menu():
         print("1. Listar usuarios conectados")
         print("2. Enviar mensaje")
         print("3. Enviar archivo")
-        print("4. Salir")
+        print("4. Ver mensajes recibidos")
+        print("5. Ver archivos recibidos")
+        print("6. Salir")
         
         opcion = input("Seleccione una opción: ")
         
@@ -323,11 +325,15 @@ def mostrar_menu():
         elif opcion == "3":
             enviar_archivo_menu()
         elif opcion == "4":
+            ver_mensajes_recibidos()
+        elif opcion == "5":
+            ver_archivos_recibidos()
+        elif opcion == "6":
             salir()
             break
         else:
-            print("Opción inválida.")
-
+            print("Opción no válida")
+            
 def listar_usuarios():
     """Muestra la lista de usuarios conectados"""
     
