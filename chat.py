@@ -402,34 +402,12 @@ def salir():
 
 if __name__ == "__main__":
     try:
-        udp_socket, tcp_socket = iniciar_sockets()
-        mi_id = generar_id_usuario()
-        usuarios_conectados = {}  
+        print("Iniciando chat descentralizado en LAN...")
         
-        print(f"\nTu ID de usuario es: {mi_id.hex()}")
-        print("Iniciando descubrimiento...\n")
-        
-        enviar_echo(udp_socket, mi_id)
+        iniciar_sockets()
+        iniciar_servicios()
+        mostrar_menu()
 
-        while True:
-            try:
-                data, addr = udp_socket.recvfrom(1024)
-                
-                if len(data) > 40:
-                    op_code = data[40]
-                    
-                    if op_code == 0:
-                        manejar_echo(udp_socket, data, addr, mi_id, usuarios_conectados)
-            
-            except KeyboardInterrupt:
-                raise
-            except:
-                print("[Error] Paquete malformado")
-                
-            if time.time() % 5 < 0.1: 
-                enviar_echo(udp_socket, mi_id)
-
-    except KeyboardInterrupt:
-        print("\nCerrando aplicación...")
-        udp_socket.close()
-        tcp_socket.close()
+    except Exception as e:
+        print(f"Error fatal: {e}")
+        salir()
