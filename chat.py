@@ -140,7 +140,36 @@ def enviar_mensajes_texto(id_destino, mensaje):
         print(f"[Error] Al enviar mensaje: {e}")
         return False
     
-
+def manejar_mensaje_recibido(data, addr):
+    """Procesa un mensaje de texto recibido"""
+    
+    try:
+        id_origen = data[:20]
+        id_destino = data[20:40]
+        operation_code = data[40]
+        body_id = data[41]
+        body_length = int.from_bytes(data[42:50], 'big')
+        
+        if id_destino != mi_id and id_destino != b'\xff'*20:
+            return
+        
+        usuarios_conectados[id_origen] = (addr[0], time.time())
+        
+        if operation_code == 1: 
+            #Enviar confirmación de header recibido
+            respuesta = struct.pack('!B 20s 4s',
+                                    0,              
+                                    mi_id,          
+                                    b'\x00'*4)      
+            
+            udp_socket.sendto(respuesta, addr)
+            
+            mensaje = "(Contenido del mensaje no implementado)"
+            mensajes_recibidos.put((id_origen, mensaje))
+            print(f"[Mensaje] Mensaje recibido de {id_origen.hex()}")
+            
+    except Exception as e:
+        print(f"[Error] Al procesar mensaje: {e}")
 
 if __name__ == "__main__":
     try:
