@@ -42,7 +42,7 @@ def iniciar_sockets():
 def iniciar_servicios():
     """Inicia los hilos para los diferentes servicios"""
     
-    threading.Thread(target=enviar_ecos_periodicos, daemon=True).start()
+    threading.Thread(target=enviar_echos_periodicos, daemon=True).start()
 
 ###########################################
 #Operación 0: Echo-Reply (Descubrimiento).
@@ -51,7 +51,7 @@ def enviar_echo():
     """Envía mensaje de descubrimiento a toda la red (broadcast)"""
     
     try:
-        header = struct.pack('!20s 20s B B 8S 50s',
+        header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,     
                             b'\xff'*20,
                             0,             
@@ -91,13 +91,55 @@ def manejar_echo(data, addr):
         print(f"[Error] Al procesar Echo: {e}")
         
         
-def enviar_ecos_periodicos():
+def enviar_echos_periodicos():
     """Envía mensajes de descubrimiento periódicamente"""
     
     while True:
         enviar_echo()
         time.sleep(10)
 
+################################
+#Operación 1: Message-Response.
+################################
+def enviar_mensajes_texto(id_destino, mensaje):
+    """
+    Envía un mensaje de texto a otro usuario
+    Devuelve True si tuvo éxito, False si hubo error
+    """
+    
+    if id_destino not in usuarios_conectados:
+        print(f"[Error] Usuario {id_destino.hex()} no encontrado")
+        return False
+    
+    try:
+        ip_destino = usuarios_conectados[id_destino][0]
+        
+        mensaje_id = int(time.time() * 1000)
+        
+        #Fase 1: Enviar header del mensaje.
+        header = struct.pack('!20s 20s B B 8s 50s',
+                            mi_id,     
+                            id_destino,
+                            1,             
+                            mensaje_id % 256,     
+                            len(mensaje).to_bytes(8, 'big'),                
+                            b'\x00'*50)  
+        
+        udp_socket.sendto(header, (ip_destino, PUERTO))
+        
+        print("[Mensaje] Header enviado, esperando confirmación...")
+        
+        #Fase 2: Enviar cuerpo del mensaje.
+        cuerpo = struct.pack('!Q', mensaje_id) + mensaje.encode('utf-8')
+        udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
+        
+        print(f"[Mensaje] Mensaje enviado a {id_destino.hex()}")
+        return True
+    
+    except Exception as e:
+        print(f"[Error] Al enviar mensaje: {e}")
+        return False
+    
 
 if __name__ == "__main__":
     try:
