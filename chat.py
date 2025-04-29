@@ -94,13 +94,6 @@ def manejar_echo(data, addr):
     except Exception as e:
         print(f"[Error] Al procesar Echo: {e}")
         
-#def enviar_echos_periodicos():
-    #"""Envía mensajes de descubrimiento periódicamente"""
-    
-    #while True:
-        #enviar_echo()
-        #time.sleep(10)
-
 ################################
 #Operación 1: Message-Response.
 ################################
