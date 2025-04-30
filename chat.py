@@ -348,25 +348,31 @@ def manejar_archivo(tcp_conn, addr):
 #Funciones de red principales. 
 ###############################
 def escuchar_udp():
-    """Escucha mensajes UDP entrantes en un bucle infinito"""
+    """Escucha mensajes UDP con manejo de cierre"""
     
-    while True:
+    while tcp_server_running:
         try:
             data, addr = udp_socket.recvfrom(HEADER_SIZE)
+            
+            if not tcp_server_running:  #Salir si se está cerrando
+                break
             
             #El header mínimo tiene 41 bytes (los otros campos son opcionales)
             if len(data) >= 41:
                 operation = data[40]
                 
-                if operation == 0:    #Echo
+                if operation == 0:    
                     manejar_echo(data, addr)
-                elif operation == 1:  #Mensaje
+                elif operation == 1: 
                     manejar_mensaje(data, addr)
-                elif operation == 2:   #File
+                elif operation == 2:  
                     print("[LCP] Header de archivo recibido")
-                
+        except socket.error as e:
+            if tcp_server_running:  # Solo muestra errores si no estamos cerrando
+                print(f"[Error] UDP: {e}")
+            continue
         except Exception as e:
-            print(f"[Error] Al recibir mensaje UDP: {e}")
+            print(f"[Error] Inesperado en UDP: {e}")
 
 def escuchar_tcp():
     """Acepta conexiones TCP para transferencia de archivos"""
