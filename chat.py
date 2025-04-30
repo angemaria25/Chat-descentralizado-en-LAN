@@ -492,12 +492,16 @@ def enviar_mensaje_menu():
         return
         
     print("\nSeleccione usuario:")
+    
     usuarios = list(usuarios_conectados.items())
-    for i, (uid, _) in enumerate(usuarios, 1):
-        print(f"{i}. {uid.hex()[:8]}...")
+    
+    for i, (uid, (ip, _)) in enumerate(usuarios, 1):
+        print(f"{i}. {uid.hex()[:8]}... (IP: {ip})")
 
     try:
-        seleccion = int(input("Número: ")) - 1
+        seleccion = input("Número: ").strip()
+        
+        
         if 0 <= seleccion < len(usuarios):
             mensaje = input("Mensaje: ")
             if enviar_mensaje(usuarios[seleccion][0], mensaje):
