@@ -296,53 +296,72 @@ def manejar_archivo(tcp_conn, addr):
     """Procesa un archivo entrante de otro usuario"""
     
     try:
-        tcp_conn.settimeout(TIMEOUT * 3)  #Más tiempo para archivos
+        tcp_conn.settimeout(1)
         
-        #Recibir ID de archivo (8 bytes)
-        file_id_data = tcp_conn.recv(8)
+        file_id_data = b''
+        start_time = time.time()
         
+        while len(file_id_data) < 8 and tcp_server_running:
+            try:
+                chunk = tcp_conn.recv(8 - len(file_id_data))
+                if not chunk:
+                    raise ConnectionError("Conexión cerrada por el remitente")
+                file_id_data += chunk
+            except socket.timeout:
+                continue  
+        
+        if not tcp_server_running:
+            raise ConnectionAbortedError("Servidor deteniéndose")
+            
         if len(file_id_data) != 8:
             raise ValueError("ID de archivo incompleto")
         
         file_id = int.from_bytes(file_id_data, 'big')
         
-        #Crear directorio para archivos recibidos
         os.makedirs("archivos_recibidos", exist_ok=True)
         filename = f"archivos_recibidos/{file_id}_{int(time.time())}.dat"
         
-        #Recibir archivo
         with open(filename, 'wb') as f:
             total_recibido = 0
-            while True:
-                data = tcp_conn.recv(4096)
-                if not data:
-                    break
-                f.write(data)
-                total_recibido += len(data)
-                print(f"\r[LCP] Recibidos {total_recibido/1024:.1f}KB", end="")
-        
+            while tcp_server_running:
+                try:
+                    data = tcp_conn.recv(4096)
+                    if not data:
+                        break  
+                    f.write(data)
+                    total_recibido += len(data)
+                    print(f"\r[LCP] Recibidos {total_recibido/1024:.1f}KB", end="")
+                except socket.timeout:
+                    continue  
+                
+        if not tcp_server_running:
+            os.remove(filename)  
+            raise ConnectionAbortedError("Transferencia cancelada por cierre del servidor")
+            
         print(f"\n[LCP] Archivo guardado como {filename}")
         
-        #Enviar confirmación por TCP 
-        respuesta = struct.pack('!B 20s 4s',
-                                0,              
-                                mi_id,
-                                b'\x00'*4)
-            
+        respuesta = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
         tcp_conn.sendall(respuesta)
-        tcp_conn.close()
         
         archivos_recibidos.put((addr[0], filename))
         
+    except ConnectionAbortedError as e:
+        print(f"[Info] {e}")
     except Exception as e:
         print(f"[Error] Al recibir archivo: {e}")
+    
         if 'tcp_conn' in locals():
-            respuesta = struct.pack('!B 20s 4s',
-                                    2,          
-                                    mi_id,
-                                    b'\x00'*4)
-            tcp_conn.sendall(respuesta)
-            tcp_conn.close()
+            try:
+                respuesta = struct.pack('!B 20s 4s', 2, mi_id, b'\x00'*4)
+                tcp_conn.sendall(respuesta)
+            except:
+                pass  
+    finally:
+        if 'tcp_conn' in locals():
+            try:
+                tcp_conn.close()
+            except:
+                pass
 
 ##############################           
 #Funciones de red principales. 
