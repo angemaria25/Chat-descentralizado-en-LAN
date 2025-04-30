@@ -501,9 +501,18 @@ def enviar_mensaje_menu():
     try:
         seleccion = input("Número: ").strip()
         
+        if not seleccion.isdigit():
+            raise ValueError("Debe ingresar un número")
+        
+        seleccion = int(seleccion) - 1
         
         if 0 <= seleccion < len(usuarios):
-            mensaje = input("Mensaje: ")
+            mensaje = input("Mensaje: ").strip()
+            
+            if not mensaje:
+                print("El mensaje no puede estar vacío")
+                return
+            
             if enviar_mensaje(usuarios[seleccion][0], mensaje):
                 print("Mensaje enviado")
             else:
