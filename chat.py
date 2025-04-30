@@ -379,8 +379,11 @@ def escuchar_tcp():
     
     while tcp_server_running:
         try:
+            tcp_socket.settimeout(1)
             conn, addr = tcp_socket.accept()
             threading.Thread(target=manejar_archivo, args=(conn, addr)).start()
+        except socket.timeout:
+            continue
         except Exception as e:
             if tcp_server_running:
                 print(f"[Error] En conexión TCP: {e}")
