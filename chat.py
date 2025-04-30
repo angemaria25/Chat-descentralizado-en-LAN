@@ -131,7 +131,6 @@ def enviar_mensajes_texto(user_id_to, mensaje):
                 print(f"[Error] Receptor reportó error: {status}")
                 return False
         
-        
             #Fase 2: Enviar cuerpo del mensaje.
             cuerpo = struct.pack('!Q', mensaje_id) + mensaje_bytes
             udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
@@ -157,8 +156,6 @@ def enviar_mensajes_texto(user_id_to, mensaje):
         print(f"[Error] Al enviar mensaje: {e}")
         return False
             
-            
-    
 def manejar_mensaje(data, addr):
     """Procesa mensaje recibido"""
     
@@ -174,7 +171,7 @@ def manejar_mensaje(data, addr):
         
         usuarios_conectados[user_id_from] = (addr[0], time.time())
         
-        if operation_code == 1: 
+        if operation == 1: 
             respuesta = struct.pack('!B 20s 4s',
                                     0,              
                                     mi_id,          
@@ -233,7 +230,6 @@ def enviar_archivo(user_id_to, filepath):
         file_size = os.path.getsize(filepath)
         file_id = int(time.time() * 1000) % 256
         
-        
         #Fase 1: Enviar header por UDP.
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,                 
@@ -286,7 +282,6 @@ def enviar_archivo(user_id_to, filepath):
                     print(f"\n[Error] Confirmación fallida: {status}")
                     return False
                 
-                
         except socket.timeout:
             print("[Error] Tiempo de espera agotado")
             return False
@@ -296,8 +291,7 @@ def enviar_archivo(user_id_to, filepath):
     except Exception as e:
         print(f"[Error] Al enviar archivo: {e}")
         return False
-
-
+    
 def manejar_archivo(tcp_conn, addr):
     """Procesa un archivo entrante de otro usuario"""
     
@@ -364,11 +358,11 @@ def escuchar_udp():
             if len(data) >= 41:
                 operation = data[40]
                 
-                if operation_code == 0:    #Echo
+                if operation == 0:    #Echo
                     manejar_echo(data, addr)
-                elif operation_code == 1:  #Mensaje
+                elif operation == 1:  #Mensaje
                     manejar_mensaje(data, addr)
-                elif operation_code == 2:   #File
+                elif operation == 2:   #File
                     print("[LCP] Header de archivo recibido")
                 
         except Exception as e:
@@ -450,7 +444,6 @@ def listar_usuarios():
         inactivo = int(time.time() - last)
         print(f"{i}. ID: {uid.hex()[:8]}... | IP: {ip} | Inactivo: {inactivo}s")
     
-
 def enviar_mensaje_menu():
     """Interfaz para enviar mensajes"""
     
@@ -523,17 +516,31 @@ def ver_archivos():
 def salir():
     """Cierra la aplicación"""
     
-    global tcp_server_running
+    global tcp_server_running, udp_socket, tcp_socket
     
+    print("Cerrando sockets y terminando hilos...")
     tcp_server_running = False
     
-    if udp_socket: 
-        udp_socket.close()
-        
-    if tcp_socket: 
-        tcp_socket.close()
+    if tcp_socket:
+        try:
+            # Crea una conexión temporal para desbloquear el accept()
+            temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            temp_socket.connect(('localhost', PUERTO))
+            temp_socket.close()
+            
+            tcp_socket.close()
+        except Exception as e:
+            print(f"[Error] Al cerrar socket TCP: {e}")
+            
+    if udp_socket:
+        try:
+            udp_socket.close()
+        except Exception as e:
+            print(f"[Error] Al cerrar socket UDP: {e}")
     
-    print("Saliendo...")
+    time.sleep(0.5)
+    print("Saliendo del programa...")
+    os._exit(0)  #Fuerza la salida de todos los hilos
 
 if __name__ == "__main__":
     try:
