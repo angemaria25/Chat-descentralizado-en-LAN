@@ -97,7 +97,7 @@ def manejar_echo(data, addr):
 ################################
 #Operación 1: Message-Response.
 ################################
-def enviar_mensajes_texto(user_id_to, mensaje):
+def enviar_mensaje(user_id_to, mensaje):
     """Envía un mensaje de texto según LCP (Operación 1)"""
     
     if user_id_to not in usuarios_conectados:
@@ -107,6 +107,13 @@ def enviar_mensajes_texto(user_id_to, mensaje):
     try:
         ip_destino = usuarios_conectados[user_id_to][0]
         mensaje_bytes = mensaje.encode('utf-8')
+        
+        # Verificar tamaño del mensaje
+        MAX_MSG_SIZE = 1024  # Tamaño máximo seguro para UDP
+        if len(mensaje_bytes) > MAX_MSG_SIZE:
+            print(f"[Error] Mensaje demasiado largo (máx {MAX_MSG_SIZE} bytes)")
+            return False
+        
         mensaje_id = int(time.time() * 1000) % 256 #1 byte
         
         #Fase 1: Enviar header del mensaje.
@@ -118,43 +125,48 @@ def enviar_mensajes_texto(user_id_to, mensaje):
                             len(mensaje_bytes).to_bytes(8, 'big'),                
                             b'\x00'*50)  
         
+        #Configurar socket para mensajes grandes
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
         udp_socket.sendto(header, (ip_destino, PUERTO))
-        
-        #Esperar respuesta según especificación
+    
+        #Esperar confirmación de header
         udp_socket.settimeout(TIMEOUT)
         
         try:
             respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
             status = respuesta[0]
             
-            if status != 0:  # 0 = OK 
-                print(f"[Error] Receptor reportó error: {status}")
+            if status != 0:  
+                print("[Error] Receptor no aceptó el mensaje")
                 return False
+        except socket.timeout:
+            print("[Error] Tiempo de espera para confirmación de header")
+            return False
         
-            #Fase 2: Enviar cuerpo del mensaje.
-            cuerpo = struct.pack('!Q', mensaje_id) + mensaje_bytes
-            udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
+        #Fase 2: Enviar cuerpo del mensaje.
+        cuerpo = struct.pack('!Q', mensaje_id) + mensaje_bytes
+        udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
             
-            #Esperar confirmación final
+        #Esperar confirmación final
+        try:
             respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
             status = respuesta[0]
             
             if status == 0:
-                print(f"[LCP] Mensaje enviado a {user_id_to.hex()}")
+                print(f"[Éxito] Mensaje enviado a {user_id_to.hex()}")
                 return True
             else:
-                print(f"[Error] Confirmación fallida: {status}")
+                print("[Error] Confirmación fallida")
                 return False
-            
         except socket.timeout:
-            print("[Error] Tiempo de espera agotado")
+            print("[Error] Tiempo de espera  para confirmación final agotado")
             return False
-        finally:
-            udp_socket.settimeout(None)
             
     except Exception as e:
         print(f"[Error] Al enviar mensaje: {e}")
         return False
+    finally:
+        udp_socket.settimeout(None)
             
 def manejar_mensaje(data, addr):
     """Procesa mensaje recibido"""
