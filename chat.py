@@ -438,7 +438,7 @@ def enviar_echos_periodicos():
     
     while True:
         enviar_echo()
-        time.sleep(15)
+        time.sleep(10)
 
 #######################
 # Interfaz de usuario.
