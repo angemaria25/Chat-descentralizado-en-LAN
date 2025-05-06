@@ -131,69 +131,68 @@ def manejar_echo(data, addr):
 ################################
 #Operación 1: Message-Response.
 ################################
-def enviar_mensaje(user_id_to, mensaje):
-    """Envía un mensaje de texto según LCP (Operación 1)"""
+def enviar_mensaje(user_id_to, mensaje, max_retries=3):
+    """Envía un mensaje con reintentos completos desde el header"""
     
     if user_id_to not in usuarios_conectados:
         print(f"[Error] Usuario {user_id_to.hex()} no encontrado")
         return False
     
-    try:
-        ip_destino = usuarios_conectados[user_id_to][0]
-        mensaje_bytes = mensaje.encode('utf-8')
-        
-        MAX_MSG_SIZE = 1024 
-        if len(mensaje_bytes) > TAM_MAX_MSJ:
-            print(f"[Error] Mensaje demasiado largo (máx {TAM_MAX_MSJ} bytes)")
-            return False
-        
-        mensaje_id = int(time.time() * 1000) % 256 #1 byte
-        
-        header = struct.pack('!20s 20s B B 8s 50s',
-                            mi_id,     
-                            user_id_to,
-                            MENSAJE,             
-                            mensaje_id,     
-                            len(mensaje_bytes).to_bytes(8, 'big'),                
-                            b'\x00'*50)  
-        
-        udp_socket.sendto(header, (ip_destino, PUERTO))
+    ip_destino = usuarios_conectados[user_id_to][0]
+    mensaje_bytes = mensaje.encode('utf-8')
     
-        udp_socket.settimeout(TIMEOUT)
-        
-        try:
-            respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
-            status = respuesta[0]
-            
-            if status != 0:  
-                print("[Error] Receptor no aceptó el mensaje")
-                return False
-        except socket.timeout:
-            print("[Error] Tiempo de espera para confirmación de header")
-            return False
-        
-        cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
-        udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
-            
-        try:
-            respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
-            status = respuesta[0]
-            
-            if status == 0:
-                print(f"[Éxito] Mensaje enviado a {user_id_to.hex()}")
-                return True
-            else:
-                print("[Error] Confirmación fallida")
-                return False
-        except socket.timeout:
-            print("[Error] Tiempo de espera  para confirmación final agotado")
-            return False
-            
-    except Exception as e:
-        print(f"[Error] Al enviar mensaje: {e}")
+    if len(mensaje_bytes) > TAM_MAX_MSJ:
+        print(f"[Error] Mensaje demasiado largo (máx {TAM_MAX_MSJ} bytes)")
         return False
-    finally:
-        udp_socket.settimeout(None)
+    
+    mensaje_id = int(time.time() * 1000) % 256
+    retry_delay = 1  # Empezar con 1 segundo de espera
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                print(f"\nReintentando mensaje ({attempt}/{max_retries})...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Aumentar delay exponencialmente
+            
+            # ----------------- FASE 1: Header -----------------
+            header = struct.pack('!20s 20s B B 8s 50s',
+                               mi_id, user_id_to, MENSAJE, mensaje_id,
+                               len(mensaje_bytes).to_bytes(8, 'big'), b'\x00'*50)
+            
+            udp_socket.settimeout(TIMEOUT)
+            udp_socket.sendto(header, (ip_destino, PUERTO))
+            
+            try:
+                respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
+                if respuesta[0] != OK:
+                    print("[Error] Receptor no aceptó el mensaje")
+                    continue  # Reintentar
+            except socket.timeout:
+                print("[Timeout] Esperando confirmación de header")
+                continue  # Reintentar
+            
+            # ----------------- FASE 2: Cuerpo -----------------
+            cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
+            udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
+            
+            try:
+                respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
+                if respuesta[0] == OK:
+                    print(f"[Éxito] Mensaje enviado a {user_id_to.hex()}")
+                    return True
+                else:
+                    print("[Error] Confirmación fallida")
+            except socket.timeout:
+                print("[Timeout] Esperando confirmación final")
+                
+        except Exception as e:
+            print(f"[Error] Intento {attempt} fallido: {e}")
+            continue
+    
+    print(f"[Fallo] No se pudo enviar después de {max_retries} intentos")
+    return False
+
         
 def enviar_mensaje_broadcast(mensaje):
     """Envía un mensaje a TODOS los usuarios con una sola transmisión"""
@@ -268,8 +267,8 @@ def manejar_mensaje(data, addr):
 ########################################################
 #Operación 2: Send File-Ack (Transferencia de archivos).
 #########################################################
-def enviar_archivo(user_id_to, filepath):
-    """Envía un archivo a otro usuario"""
+def enviar_archivo(user_id_to, filepath, max_retries=3):
+    """Envía un archivo con reintentos completos desde el header"""
     
     if user_id_to not in usuarios_conectados:
         print(f"[Error] Usuario {user_id_to.hex()} no encontrado")
@@ -279,68 +278,73 @@ def enviar_archivo(user_id_to, filepath):
         print(f"[Error] Archivo no encontrado: {filepath}")
         return False
     
-    try:
-        ip_destino = usuarios_conectados[user_id_to][0]
-        file_size = os.path.getsize(filepath)
-        file_id = int(time.time() * 1000) % 256
-        
-        header = struct.pack('!20s 20s B B 8s 50s',
-                            mi_id,                 
-                            user_id_to,            
-                            ARCHIVO,                     
-                            file_id,         
-                            file_size.to_bytes(8, 'big'),  
-                            b'\x00'*50)           
-        
-        udp_socket.sendto(header, (ip_destino, PUERTO))
-        
-        udp_socket.settimeout(TIMEOUT)
-        
-        try:
-            respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
-            status = respuesta[0]
-            
-            if status != 0:
-                print(f"[Error] Receptor reportó error: {status}")
-                return False
-            
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_send_socket:
-                tcp_send_socket.settimeout(TIMEOUT * 3) #Más tiempo para archivos
-                tcp_send_socket.connect((ip_destino, PUERTO))
-                
-                with open(filepath, 'rb') as f:
-                    tcp_send_socket.sendall(file_id.to_bytes(8, 'big'))
-                    
-                    #Enviar archivo en chunks
-                    total_sent = 0
-                    while True:
-                        chunk = f.read(TAM_CHUNK)
-                        if not chunk:
-                            break
-                        tcp_send_socket.sendall(chunk)
-                        total_sent += len(chunk)
-                        print(f"\r[LCP] Enviados {total_sent/1024:.1f}KB/{file_size/1024:.1f}KB", end="")
-                
-                confirmacion = tcp_send_socket.recv(RESPONSE_SIZE)
-                status = confirmacion[0]
-                
-                if status == OK:
-                    print(f"\n[LCP] Archivo enviado a {user_id_to.hex()}")
-                    return True
-                else:
-                    print(f"\n[Error] Confirmación fallida: {status}")
-                    return False
-                
-        except socket.timeout:
-            print("[Error] Tiempo de espera agotado")
-            return False
-        finally:
-            udp_socket.settimeout(None)   
-            
-    except Exception as e:
-        print(f"[Error] Al enviar archivo: {e}")
-        return False
+    ip_destino = usuarios_conectados[user_id_to][0]
+    file_size = os.path.getsize(filepath)
+    file_id = int(time.time() * 1000) % 256
+    retry_delay = 1  # Delay inicial entre reintentos
     
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                print(f"\nReintentando archivo ({attempt}/{max_retries})...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Backoff exponencial
+            
+            # ----------------- FASE 1: Header UDP -----------------
+            header = struct.pack('!20s 20s B B 8s 50s',
+                              mi_id, user_id_to, ARCHIVO, file_id,
+                              file_size.to_bytes(8, 'big'), b'\x00'*50)
+            
+            udp_socket.settimeout(TIMEOUT)
+            udp_socket.sendto(header, (ip_destino, PUERTO))
+            
+            try:
+                respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
+                if respuesta[0] != OK:
+                    print(f"[Error] Receptor reportó error: {respuesta[0]}")
+                    continue  # Reintentar
+            except socket.timeout:
+                print("[Timeout] Esperando confirmación de header")
+                continue  # Reintentar
+            
+            # ----------------- FASE 2: Transferencia TCP -----------------
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_sock:
+                    tcp_sock.settimeout(TIMEOUT * 3)
+                    tcp_sock.connect((ip_destino, PUERTO))
+                    
+                    # Enviar metadata primero (ID + tamaño)
+                    tcp_sock.sendall(file_id.to_bytes(8, 'big'))
+                    
+                    # Transferir archivo en chunks
+                    total_sent = 0
+                    with open(filepath, 'rb') as f:
+                        while total_sent < file_size:
+                            chunk = f.read(TAM_CHUNK)
+                            tcp_sock.sendall(chunk)
+                            total_sent += len(chunk)
+                            print(f"\rEnviados {total_sent/1024:.1f}KB/{file_size/1024:.1f}KB", end="")
+                    
+                    # Esperar confirmación final
+                    confirmacion = tcp_sock.recv(RESPONSE_SIZE)
+                    if confirmacion[0] == OK:
+                        print(f"\n[Éxito] Archivo enviado a {user_id_to.hex()}")
+                        return True
+                    else:
+                        print(f"\n[Error] Confirmación fallida: {confirmacion[0]}")
+                        
+            except (socket.timeout, ConnectionError) as e:
+                print(f"\n[Error] En transferencia TCP: {e}")
+                continue
+                
+        except Exception as e:
+            print(f"[Error] Intento {attempt} fallido: {e}")
+            continue
+    
+    print(f"[Fallo] No se pudo enviar después de {max_retries} intentos")
+    return False
+
+
 def manejar_archivo(tcp_conn, addr):
     """Procesa un archivo entrante de otro usuario"""
     
