@@ -146,20 +146,23 @@ def enviar_mensaje(user_id_to, mensaje, max_retries=3):
         return False
     
     mensaje_id = int(time.time() * 1000) % 256
-    retry_delay = 1  # Empezar con 1 segundo de espera
+    retry_delay = 1  
     
     for attempt in range(max_retries):
         try:
             if attempt > 0:
                 print(f"\nReintentando mensaje ({attempt}/{max_retries})...")
                 time.sleep(retry_delay)
-                retry_delay *= 2  # Aumentar delay exponencialmente
+                retry_delay *= 2 
             
-            # ----------------- FASE 1: Header -----------------
             header = struct.pack('!20s 20s B B 8s 50s',
-                               mi_id, user_id_to, MENSAJE, mensaje_id,
-                               len(mensaje_bytes).to_bytes(8, 'big'), b'\x00'*50)
-            
+                                mi_id, 
+                                user_id_to, 
+                                MENSAJE, 
+                                mensaje_id,
+                                len(mensaje_bytes).to_bytes(8, 'big'), 
+                                b'\x00'*50)
+                
             udp_socket.settimeout(TIMEOUT)
             udp_socket.sendto(header, (ip_destino, PUERTO))
             
@@ -167,12 +170,11 @@ def enviar_mensaje(user_id_to, mensaje, max_retries=3):
                 respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
                 if respuesta[0] != OK:
                     print("[Error] Receptor no aceptó el mensaje")
-                    continue  # Reintentar
+                    continue  
             except socket.timeout:
                 print("[Timeout] Esperando confirmación de header")
-                continue  # Reintentar
+                continue  
             
-            # ----------------- FASE 2: Cuerpo -----------------
             cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
             udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
             
@@ -193,7 +195,6 @@ def enviar_mensaje(user_id_to, mensaje, max_retries=3):
     print(f"[Fallo] No se pudo enviar después de {max_retries} intentos")
     return False
 
-        
 def enviar_mensaje_broadcast(mensaje):
     """Envía un mensaje a TODOS los usuarios con una sola transmisión"""
     try:
@@ -281,20 +282,23 @@ def enviar_archivo(user_id_to, filepath, max_retries=3):
     ip_destino = usuarios_conectados[user_id_to][0]
     file_size = os.path.getsize(filepath)
     file_id = int(time.time() * 1000) % 256
-    retry_delay = 1  # Delay inicial entre reintentos
+    retry_delay = 1  
     
     for attempt in range(max_retries):
         try:
             if attempt > 0:
                 print(f"\nReintentando archivo ({attempt}/{max_retries})...")
                 time.sleep(retry_delay)
-                retry_delay *= 2  # Backoff exponencial
+                retry_delay *= 2 
             
-            # ----------------- FASE 1: Header UDP -----------------
             header = struct.pack('!20s 20s B B 8s 50s',
-                              mi_id, user_id_to, ARCHIVO, file_id,
-                              file_size.to_bytes(8, 'big'), b'\x00'*50)
-            
+                                mi_id, 
+                                user_id_to,
+                                ARCHIVO, 
+                                file_id,
+                                file_size.to_bytes(8, 'big'),
+                                b'\x00'*50)
+                
             udp_socket.settimeout(TIMEOUT)
             udp_socket.sendto(header, (ip_destino, PUERTO))
             
@@ -302,21 +306,18 @@ def enviar_archivo(user_id_to, filepath, max_retries=3):
                 respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
                 if respuesta[0] != OK:
                     print(f"[Error] Receptor reportó error: {respuesta[0]}")
-                    continue  # Reintentar
+                    continue  
             except socket.timeout:
                 print("[Timeout] Esperando confirmación de header")
-                continue  # Reintentar
+                continue  
             
-            # ----------------- FASE 2: Transferencia TCP -----------------
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_sock:
                     tcp_sock.settimeout(TIMEOUT * 3)
                     tcp_sock.connect((ip_destino, PUERTO))
                     
-                    # Enviar metadata primero (ID + tamaño)
                     tcp_sock.sendall(file_id.to_bytes(8, 'big'))
                     
-                    # Transferir archivo en chunks
                     total_sent = 0
                     with open(filepath, 'rb') as f:
                         while total_sent < file_size:
@@ -325,7 +326,6 @@ def enviar_archivo(user_id_to, filepath, max_retries=3):
                             total_sent += len(chunk)
                             print(f"\rEnviados {total_sent/1024:.1f}KB/{file_size/1024:.1f}KB", end="")
                     
-                    # Esperar confirmación final
                     confirmacion = tcp_sock.recv(RESPONSE_SIZE)
                     if confirmacion[0] == OK:
                         print(f"\n[Éxito] Archivo enviado a {user_id_to.hex()}")
@@ -343,7 +343,6 @@ def enviar_archivo(user_id_to, filepath, max_retries=3):
     
     print(f"[Fallo] No se pudo enviar después de {max_retries} intentos")
     return False
-
 
 def manejar_archivo(tcp_conn, addr):
     """Procesa un archivo entrante de otro usuario"""
