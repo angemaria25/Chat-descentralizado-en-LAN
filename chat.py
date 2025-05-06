@@ -124,8 +124,6 @@ def enviar_mensaje(user_id_to, mensaje):
                             len(mensaje_bytes).to_bytes(8, 'big'),                
                             b'\x00'*50)  
         
-        #Configurar socket para mensajes grandes
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
         udp_socket.sendto(header, (ip_destino, PUERTO))
     
         udp_socket.settimeout(TIMEOUT)
@@ -141,7 +139,7 @@ def enviar_mensaje(user_id_to, mensaje):
             print("[Error] Tiempo de espera para confirmación de header")
             return False
         
-        cuerpo = struct.pack('!Q', mensaje_id) + mensaje_bytes
+        cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
         udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
             
         try:
@@ -169,54 +167,32 @@ def manejar_mensaje(data, addr):
     
     try:
         user_id_from = data[:20]
-        user_id_to = data[20:40]
         operation = data[40]
-        body_id = data[41]
-        body_length = int.from_bytes(data[42:50], 'big')
         
-        if user_id_to != mi_id and user_id_to != b'\xff'*20:
-            return
+        if operation == 1:
+            body_id = data[41]
+            body_length = int.from_bytes(data[42:50], 'big')
         
-        usuarios_conectados[user_id_from] = (addr[0], time.time())
-        
-        if operation == 1: 
-            respuesta = struct.pack('!B 20s 4s',
-                                    0,              
-                                    mi_id,          
-                                    b'\x00'*4)      
-            
+            #Enviar confirmación de header
+            respuesta = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
             udp_socket.sendto(respuesta, addr)
             
+            # Recibir cuerpo
             udp_socket.settimeout(TIMEOUT)
+            cuerpo_data, _ = udp_socket.recvfrom(body_length + 1)  # +1 por BodyId (1 byte)
+        
+            # --- CAMBIO 3: Verificación con BodyId de 1 byte ---
+            recibido_id = cuerpo_data[0]  # Primer byte = BodyId
+            if recibido_id != body_id:
+                print("[Error] ID de mensaje no coincide")
+                return
             
-            try:
-                cuerpo_data, _ = udp_socket.recvfrom(body_length + 8) 
-                
-                recibido_id = struct.unpack('!Q', cuerpo_data[:8])[0]
-                if (recibido_id % 256) != body_id:
-                    print("[Error] ID de mensaje no coincide")
-                    return
-                
-                mensaje = cuerpo_data[8:].decode('utf-8')
-                timestamp = time.strftime("%H:%M:%S")
-                mensajes_recibidos.put((user_id_from, timestamp, mensaje))
-                
-                print(f"\n[LCP] Mensaje de {user_id_from.hex()}: {mensaje}\n> ", end="")
+            mensaje = cuerpo_data[1:].decode('utf-8')  # Resto = contenido
+            mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje))
             
-                confirmacion = struct.pack('!B 20s 4s',
-                                            0,         
-                                            mi_id,
-                                            b'\x00'*4)
-                
-                udp_socket.sendto(confirmacion, addr)
-                
-            except socket.timeout:
-                print("[Error] Tiempo de espera para cuerpo del mensaje")
-            finally:
-                udp_socket.settimeout(None)
-                
-    except Exception as e:
-        print(f"[Error] Al procesar mensaje: {e}")
+            # Confirmación final
+            confirmacion = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
+            udp_socket.sendto(confirmacion, addr)
 
 ########################################################
 #Operación 2: Send File-Ack (Transferencia de archivos).
