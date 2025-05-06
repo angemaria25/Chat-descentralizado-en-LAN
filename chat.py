@@ -10,6 +10,7 @@ BROADCAST_ADDR = '255.255.255.255'
 HEADER_SIZE = 100
 RESPONSE_SIZE = 25
 TIMEOUT = 5
+BROADCAST_ID = b'\xff'*20  # 20 bytes de 0xFF
 
 mi_id = os.urandom(20)  
 usuarios_conectados = {}  
