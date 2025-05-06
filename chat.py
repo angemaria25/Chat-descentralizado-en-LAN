@@ -324,7 +324,7 @@ def enviar_archivo(user_id_to, filepath):
                 confirmacion = tcp_send_socket.recv(RESPONSE_SIZE)
                 status = confirmacion[0]
                 
-                if status == 0:
+                if status == OK:
                     print(f"\n[LCP] Archivo enviado a {user_id_to.hex()}")
                     return True
                 else:
