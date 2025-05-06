@@ -40,10 +40,14 @@ tcp_server_running = True
 grupos = {} 
 usuarios_grupos = {}
 
+historial_mensajes = {}
+historial_grupos = {}
+
 udp_socket = None
 tcp_socket = None
 
 usuarios_lock = threading.Lock()
+historial_lock = threading.Lock()
 
 def iniciar_sockets():
     """Configura y retorna los sockets UDP y TCP"""
