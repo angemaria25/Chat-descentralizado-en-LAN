@@ -549,13 +549,14 @@ def enviar_archivo_menu():
         print("Entrada inválida")
         
 def ver_mensajes():
-    """Muestra mensajes recibidos"""
+    """Muestra mensajes indicando si son broadcast"""
     
     print("\nMensajes recibidos:")
     
     while not mensajes_recibidos.empty():
-        uid, hora,  msg = mensajes_recibidos.get()
-        print(f"{hora} - {uid.hex()[:8]}...: {msg}")
+        uid, hora,  msg, es_broadcast = mensajes_recibidos.get()
+        tipo = " (BROADCAST)" if es_broadcast else ""
+        print(f"{hora} - {uid.hex()[:8]}...{tipo}: {msg}")
         
 def ver_archivos():
     """Muestra archivos recibidos"""
