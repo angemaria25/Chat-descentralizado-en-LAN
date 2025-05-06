@@ -442,13 +442,14 @@ def mostrar_menu():
     """Muestra el menú principal y maneja las opciones"""
     
     while True:
-        print("\n--- Chat LCP ---")
+        print("\n--- Chat LAN ---")
         print("1. Listar usuarios")
-        print("2. Enviar mensaje")
-        print("3. Enviar archivo")
-        print("4. Ver mensajes")
-        print("5. Ver archivos")
-        print("6. Salir")
+        print("2. Enviar mensaje directo")
+        print("3. Enviar mensaje a TODOS (broadcast)")
+        print("4. Enviar archivo")
+        print("5. Ver mensajes")
+        print("6. Ver archivos")
+        print("7. Salir")
         
         opcion = input("Seleccione: ")
         
@@ -457,12 +458,15 @@ def mostrar_menu():
         elif opcion == "2":
             enviar_mensaje_menu()
         elif opcion == "3":
-            enviar_archivo_menu()
+            mensaje = input("Mensaje para TODOS los usuarios: ")
+            enviar_mensaje_broadcast(mensaje)
         elif opcion == "4":
-            ver_mensajes()
+            enviar_archivo_menu()
         elif opcion == "5":
-            ver_archivos()
+            ver_mensajes()
         elif opcion == "6":
+            ver_archivos()
+        elif opcion == "7":
             salir()
             break
         else:
