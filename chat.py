@@ -549,18 +549,40 @@ def manejar_mensaje_grupal(data, addr):
         mensaje = cuerpo_data.decode('utf-8')
         
         with usuarios_lock:
-            if group_id in grupos and user_id_from in grupos[group_id]['miembros']:
-                #Reenviar a todos los miembros (excepto al remitente)
-                for member in grupos[group_id]['miembros']:
-                    if member != user_id_from and member in usuarios_conectados:
-                        threading.Thread(
-                            target=enviar_mensaje,
-                            args=(member, f"[GRUPO:{grupos[group_id]['nombre']}] {mensaje}"),
-                            daemon=True
-                        ).start()
+            if group_id not in grupos:
+                print(f"[Grupo] ID {group_id.hex()} no existe")
+                return
+                
+            if user_id_from not in grupos[group_id]['miembros']:
+                print(f"[Grupo] Usuario {user_id_from.hex()} no es miembro")
+                return
+            
+            nombre_grupo = grupos[group_id]['nombre']
+            miembros = grupos[group_id]['miembros'].copy()
+            
+        mensaje_grupal = f"[GRUPO:{nombre_grupo}] {mensaje}"
         
+        #Enviar a cada miembro conectado (excepto remitente)
+        for member in miembros:
+            if member == user_id_from:
+                continue  #Saltar al remitente
+                
+            if member in usuarios_conectados:
+                ip_destino = usuarios_conectados[member][0]
+                threading.Thread(
+                    target=enviar_mensaje,
+                    args=(member, mensaje_grupal),
+                    daemon=True
+                ).start()
+                print(f"[Grupo] Mensaje enviado a {member.hex()[:8]}...")
+            else:
+                print(f"[Grupo] Miembro {member.hex()[:8]}... no conectado")
+        
+    except socket.timeout:
+        print("[Error] Tiempo de espera para recibir cuerpo del mensaje")
     except Exception as e:
         print(f"[Error] Al procesar mensaje grupal: {e}")
+
 #####################
 #Interfaz de usuario.
 #####################
