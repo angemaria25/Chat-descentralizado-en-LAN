@@ -192,7 +192,7 @@ def enviar_mensaje_broadcast(mensaje):
 
 
 def manejar_mensaje(data, addr):
-    """Procesa mensaje recibido"""
+    """Procesa mensajes recibidos"""
     
     try:
         user_id_from = data[:20]
@@ -221,6 +221,7 @@ def manejar_mensaje(data, addr):
                 return
             
             mensaje = cuerpo_data[1:].decode('utf-8') 
+            
             mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje, es_broadcast))
             
             if not es_broadcast:
@@ -403,6 +404,26 @@ def escuchar_udp():
                     ).start()
                 elif operation == 2:  
                     print("[LCP] Header de archivo recibido")
+                elif operation == 3:  
+                    threading.Thread(
+                        target=manejar_creacion_grupo,
+                        args=(data, addr),
+                        daemon=True
+                    ).start()
+                elif operation == 4:  
+                    threading.Thread(
+                        target=manejar_suscripcion_grupo,
+                        args=(data, addr),
+                        daemon=True
+                    ).start()
+                elif operation == 5: 
+                    threading.Thread(
+                        target=manejar_mensaje_grupal,
+                        args=(data, addr),
+                        daemon=True
+                    ).start()
+                else:
+                    print(f"[LCP] Operación desconocida: {operation}")
         except socket.error as e:
             if tcp_server_running:  
                 print(f"[Error] UDP: {e}")
@@ -443,10 +464,84 @@ def enviar_echos_periodicos():
     while True:
         enviar_echo()
         time.sleep(10)
-
-#######################
-# Interfaz de usuario.
-#######################
+        
+###################
+#Mensajes Grupales.
+###################
+def manejar_creacion_grupo(data, addr):
+    """Procesa solicitud de creación de nuevo grupo"""
+    
+    try:
+        user_id_from = data[:20]
+        nombre_length = int.from_bytes(data[42:50], 'big')
+        nombre_grupo = data[HEADER_SIZE:HEADER_SIZE+nombre_length].decode('utf-8')
+        
+        with usuarios_lock:
+            group_id = os.urandom(10)
+            grupos[group_id] = {
+                'nombre': nombre_grupo,
+                'creador': user_id_from,
+                'miembros': {user_id_from}
+            }
+            usuarios_grupos[user_id_from].add(group_id)
+        
+        #Envía confirmación con el group_id
+        respuesta = struct.pack('!B 20s 10s 4s', 0, mi_id, group_id, b'\x00'*4)
+        udp_socket.sendto(respuesta, addr)
+        
+    except Exception as e:
+        print(f"[Error] Al crear grupo: {e}")
+        respuesta = struct.pack('!B 20s 10s 4s', 2, mi_id, b'\x00'*10, b'\x00'*4)
+        udp_socket.sendto(respuesta, addr)
+        
+        
+def manejar_suscripcion_grupo(data, addr):
+    """Procesa solicitud de unirse a un grupo existente"""
+    
+    try:
+        user_id_from = data[:20]
+        group_id = data[50:60]  
+        with usuarios_lock:
+            if group_id in grupos:
+                grupos[group_id]['miembros'].add(user_id_from)
+                usuarios_grupos[user_id_from].add(group_id)
+                status = 0  
+            else:
+                status = 1  
+        
+        respuesta = struct.pack('!B 20s 4s', status, mi_id, b'\x00'*4)
+        udp_socket.sendto(respuesta, addr)
+        
+    except Exception as e:
+        print(f"[Error] En suscripción a grupo: {e}")
+        
+def manejar_mensaje_grupal(data, addr):
+    """Procesa mensaje destinado a un grupo"""
+    
+    try:
+        user_id_from = data[:20]
+        group_id = data[50:60]
+        body_length = int.from_bytes(data[42:50], 'big')
+        
+        cuerpo_data, _ = udp_socket.recvfrom(body_length)
+        mensaje = cuerpo_data.decode('utf-8')
+        
+        with usuarios_lock:
+            if group_id in grupos and user_id_from in grupos[group_id]['miembros']:
+                #Reenviar a todos los miembros (excepto al remitente)
+                for member in grupos[group_id]['miembros']:
+                    if member != user_id_from and member in usuarios_conectados:
+                        threading.Thread(
+                            target=enviar_mensaje,
+                            args=(member, f"[GRUPO:{grupos[group_id]['nombre']}] {mensaje}"),
+                            daemon=True
+                        ).start()
+        
+    except Exception as e:
+        print(f"[Error] Al procesar mensaje grupal: {e}")
+#####################
+#Interfaz de usuario.
+#####################
 def mostrar_menu():
     """Muestra el menú principal y maneja las opciones"""
     
