@@ -12,6 +12,8 @@ RESPONSE_SIZE = 25
 TIMEOUT = 5
 BROADCAST_ID = b'\xff'*20  # 20 bytes de 0xFF
 
+usuarios_lock = threading.Lock()
+
 mi_id = os.urandom(20)  
 usuarios_conectados = {}  
 mensajes_recibidos = Queue()
@@ -83,7 +85,10 @@ def manejar_echo(data, addr):
         if user_id_from == mi_id:
             return
         
-        usuarios_conectados[user_id_from] = (addr[0], time.time())
+        #Zona crítica (protegemos el acceso al diccionario)
+        with usuarios_lock:
+            usuarios_conectados[user_id_from] = (addr[0], time.time())
+        
         print(f"[LCP] Usuario descubierto: {user_id_from.hex()} desde {addr[0]}")
         
         respuesta = struct.pack('!B 20s 4s',
@@ -376,7 +381,7 @@ def manejar_archivo(tcp_conn, addr):
 #Funciones de red principales. 
 ###############################
 def escuchar_udp():
-    """Escucha mensajes UDP con manejo de cierre"""
+    """Escucha mensajes UDP y crea un hilo para cada mensaje"""
     
     while tcp_server_running:
         try:
@@ -391,11 +396,15 @@ def escuchar_udp():
                 if operation == 0:    
                     manejar_echo(data, addr)
                 elif operation == 1: 
-                    manejar_mensaje(data, addr)
+                    threading.Thread(
+                        target=manejar_mensaje,
+                        args=(data, addr),
+                        daemon=True
+                    ).start()
                 elif operation == 2:  
                     print("[LCP] Header de archivo recibido")
         except socket.error as e:
-            if tcp_server_running:  # 
+            if tcp_server_running:  
                 print(f"[Error] UDP: {e}")
             continue
         except Exception as e:
