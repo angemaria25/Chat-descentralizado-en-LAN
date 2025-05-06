@@ -162,7 +162,30 @@ def enviar_mensaje(user_id_to, mensaje):
         return False
     finally:
         udp_socket.settimeout(None)
-            
+        
+def enviar_mensaje_broadcast(mensaje):
+    """Envía un mensaje a TODOS los usuarios con una sola transmisión"""
+    try:
+        mensaje_bytes = mensaje.encode('utf-8')
+        mensaje_id = int(time.time() * 1000) % 256  
+        
+        header = struct.pack('!20s 20s B B 8s 50s',
+                            mi_id,          
+                            BROADCAST_ID,   
+                            1,             
+                            mensaje_id,     
+                            len(mensaje_bytes).to_bytes(8, 'big'),
+                            b'\x00'*50)
+        
+        cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
+        
+        udp_socket.sendto(header + cuerpo, (BROADCAST_ADDR, PUERTO))
+        print(f"[Broadcast] Mensaje enviado a toda la red: {mensaje}")
+        
+    except Exception as e:
+        print(f"[Error] En broadcast: {e}")
+
+
 def manejar_mensaje(data, addr):
     """Procesa mensaje recibido"""
     
@@ -201,28 +224,6 @@ def manejar_mensaje(data, addr):
                 
     except Exception as e:
         print(f"[Error] Al procesar mensaje: {e}")
-
-def enviar_mensaje_broadcast(mensaje):
-    """Envía un mensaje a TODOS los usuarios con una sola transmisión"""
-    try:
-        mensaje_bytes = mensaje.encode('utf-8')
-        mensaje_id = int(time.time() * 1000) % 256  
-        
-        header = struct.pack('!20s 20s B B 8s 50s',
-                            mi_id,          
-                            BROADCAST_ID,   
-                            1,             
-                            mensaje_id,     
-                            len(mensaje_bytes).to_bytes(8, 'big'),
-                            b'\x00'*50)
-        
-        cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
-        
-        udp_socket.sendto(header + cuerpo, (BROADCAST_ADDR, PUERTO))
-        print(f"[Broadcast] Mensaje enviado a toda la red: {mensaje}")
-        
-    except Exception as e:
-        print(f"[Error] En broadcast: {e}")
 
 ########################################################
 #Operación 2: Send File-Ack (Transferencia de archivos).
