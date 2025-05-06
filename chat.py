@@ -813,18 +813,28 @@ def salir():
     print("Saliendo del programa...")
     os._exit(0)  #Fuerza la salida de todos los hilos
 
-if __name__ == "__main__":
-    try:
-        print("Iniciando cliente LCP...")
+#if __name__ == "__main__":
+    #try:
+        #print("Iniciando cliente LCP...")
         
-        iniciar_sockets()
-        iniciar_servicios()
-        mostrar_menu()
+        #iniciar_sockets()
+        #iniciar_servicios()
+        #mostrar_menu()
         
-    except KeyboardInterrupt:
-        print("\nInterrumpido por usuario")
+    #except KeyboardInterrupt:
+        #print("\nInterrumpido por usuario")
         
-    except Exception as e:
-        print(f"Error fatal: {e}")
-    finally:
-        salir()
+    #except Exception as e:
+        #print(f"Error fatal: {e}")
+    #finally:
+        #salir()
+        
+def iniciar_aplicacion(modo_streamlit=False):
+    """Inicia la aplicación en modo terminal o como backend para Streamlit"""
+    
+    print("Iniciando cliente LCP...")
+    iniciar_sockets()
+    iniciar_servicios()
+    
+    if not modo_streamlit:
+        mostrar_menu() 
