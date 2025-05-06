@@ -109,15 +109,13 @@ def enviar_mensaje(user_id_to, mensaje):
         ip_destino = usuarios_conectados[user_id_to][0]
         mensaje_bytes = mensaje.encode('utf-8')
         
-        # Verificar tamaño del mensaje
-        MAX_MSG_SIZE = 1024  # Tamaño máximo seguro para UDP
+        MAX_MSG_SIZE = 1024 
         if len(mensaje_bytes) > MAX_MSG_SIZE:
             print(f"[Error] Mensaje demasiado largo (máx {MAX_MSG_SIZE} bytes)")
             return False
         
         mensaje_id = int(time.time() * 1000) % 256 #1 byte
         
-        #Fase 1: Enviar header del mensaje.
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,     
                             user_id_to,
@@ -130,7 +128,6 @@ def enviar_mensaje(user_id_to, mensaje):
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
         udp_socket.sendto(header, (ip_destino, PUERTO))
     
-        #Esperar confirmación de header
         udp_socket.settimeout(TIMEOUT)
         
         try:
@@ -144,11 +141,9 @@ def enviar_mensaje(user_id_to, mensaje):
             print("[Error] Tiempo de espera para confirmación de header")
             return False
         
-        #Fase 2: Enviar cuerpo del mensaje.
         cuerpo = struct.pack('!Q', mensaje_id) + mensaje_bytes
         udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
             
-        #Esperar confirmación final
         try:
             respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
             status = respuesta[0]
@@ -192,7 +187,6 @@ def manejar_mensaje(data, addr):
             
             udp_socket.sendto(respuesta, addr)
             
-            # Recibir cuerpo del mensaje
             udp_socket.settimeout(TIMEOUT)
             
             try:
@@ -243,7 +237,6 @@ def enviar_archivo(user_id_to, filepath):
         file_size = os.path.getsize(filepath)
         file_id = int(time.time() * 1000) % 256
         
-        #Fase 1: Enviar header por UDP.
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,                 
                             user_id_to,            
@@ -254,7 +247,6 @@ def enviar_archivo(user_id_to, filepath):
         
         udp_socket.sendto(header, (ip_destino, PUERTO))
         
-        #Esperar respuesta UDP según LCP
         udp_socket.settimeout(TIMEOUT)
         
         try:
@@ -265,12 +257,10 @@ def enviar_archivo(user_id_to, filepath):
                 print(f"[Error] Receptor reportó error: {status}")
                 return False
             
-            #Fase 2: Enviar archivo por TCP.
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp_send_socket:
                 tcp_send_socket.settimeout(TIMEOUT * 3) #Más tiempo para archivos
                 tcp_send_socket.connect((ip_destino, PUERTO))
                 
-                #Enviar ID de archivo y contenido
                 with open(filepath, 'rb') as f:
                     tcp_send_socket.sendall(file_id.to_bytes(8, 'big'))
                     
@@ -284,7 +274,6 @@ def enviar_archivo(user_id_to, filepath):
                         total_sent += len(chunk)
                         print(f"\r[LCP] Enviados {total_sent/1024:.1f}KB/{file_size/1024:.1f}KB", end="")
                 
-                #Esperar confirmación final por TCP
                 confirmacion = tcp_send_socket.recv(RESPONSE_SIZE)
                 status = confirmacion[0]
                 
@@ -386,10 +375,9 @@ def escuchar_udp():
         try:
             data, addr = udp_socket.recvfrom(HEADER_SIZE)
             
-            if not tcp_server_running:  #Salir si se está cerrando
+            if not tcp_server_running:  
                 break
             
-            #El header mínimo tiene 41 bytes (los otros campos son opcionales)
             if len(data) >= 41:
                 operation = data[40]
                 
@@ -400,7 +388,7 @@ def escuchar_udp():
                 elif operation == 2:  
                     print("[LCP] Header de archivo recibido")
         except socket.error as e:
-            if tcp_server_running:  # Solo muestra errores si no estamos cerrando
+            if tcp_server_running:  # 
                 print(f"[Error] UDP: {e}")
             continue
         except Exception as e:
@@ -577,7 +565,7 @@ def salir():
     
     if tcp_socket:
         try:
-            # Crea una conexión temporal para desbloquear el accept()
+            #Crea una conexión temporal para desbloquear el accept()
             temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             temp_socket.connect(('localhost', PUERTO))
             temp_socket.close()
