@@ -10,9 +10,26 @@ BROADCAST_ADDR = '255.255.255.255'
 HEADER_SIZE = 100
 RESPONSE_SIZE = 25
 TIMEOUT = 5
-BROADCAST_ID = b'\xff'*20  # 20 bytes de 0xFF
+BROADCAST_ID = b'\xff'*20  
 
-usuarios_lock = threading.Lock()
+#Código de Operaciones
+ECHO = 0             
+MENSAJE = 1          
+ARCHIVO = 2          
+CREAR_GRUPO = 3      
+UNIRSE_GRUPO = 4     
+MENSAJE_GRUPAL = 5   
+
+#Códigos de respuesta
+OK = 0
+PETICION_INVALIDA = 1
+ERROR_INTERNO = 2
+
+#Configuración
+TAM_MAX_MSJ = 1024              
+TAM_CHUNK = 4096                 
+INTERVALO_ECO = 10               
+TIEMPO_INACTIVIDAD = TIMEOUT * 3 
 
 mi_id = os.urandom(20)  
 usuarios_conectados = {}  
@@ -20,8 +37,13 @@ mensajes_recibidos = Queue()
 archivos_recibidos = Queue()
 tcp_server_running = True
 
+grupos = {} 
+usuarios_grupos = {}
+
 udp_socket = None
 tcp_socket = None
+
+usuarios_lock = threading.Lock()
 
 def iniciar_sockets():
     """Configura y retorna los sockets UDP y TCP"""
@@ -65,8 +87,8 @@ def enviar_echo():
     try:
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,     
-                            b'\xff'*20,
-                            0,             
+                            BROADCAST_ID,
+                            ECHO,             
                             0,     
                             b'\x00'*8,                
                             b'\x00'*50)             
@@ -92,7 +114,7 @@ def manejar_echo(data, addr):
         print(f"[LCP] Usuario descubierto: {user_id_from.hex()} desde {addr[0]}")
         
         respuesta = struct.pack('!B 20s 4s',
-                                0,              
+                                OK,              
                                 mi_id,          
                                 b'\x00'*4)     
         
@@ -116,8 +138,8 @@ def enviar_mensaje(user_id_to, mensaje):
         mensaje_bytes = mensaje.encode('utf-8')
         
         MAX_MSG_SIZE = 1024 
-        if len(mensaje_bytes) > MAX_MSG_SIZE:
-            print(f"[Error] Mensaje demasiado largo (máx {MAX_MSG_SIZE} bytes)")
+        if len(mensaje_bytes) > TAM_MAX_MSJ:
+            print(f"[Error] Mensaje demasiado largo (máx {TAM_MAX_MSJ} bytes)")
             return False
         
         mensaje_id = int(time.time() * 1000) % 256 #1 byte
@@ -125,7 +147,7 @@ def enviar_mensaje(user_id_to, mensaje):
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,     
                             user_id_to,
-                            1,             
+                            MENSAJE,             
                             mensaje_id,     
                             len(mensaje_bytes).to_bytes(8, 'big'),                
                             b'\x00'*50)  
@@ -177,7 +199,7 @@ def enviar_mensaje_broadcast(mensaje):
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,          
                             BROADCAST_ID,   
-                            1,             
+                            MENSAJE,             
                             mensaje_id,     
                             len(mensaje_bytes).to_bytes(8, 'big'),
                             b'\x00'*50)
@@ -209,7 +231,7 @@ def manejar_mensaje(data, addr):
             body_id = data[41]
             body_length = int.from_bytes(data[42:50], 'big')
         
-            respuesta = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
+            respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
             udp_socket.sendto(respuesta, addr)
             
             udp_socket.settimeout(TIMEOUT)
@@ -253,7 +275,7 @@ def enviar_archivo(user_id_to, filepath):
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,                 
                             user_id_to,            
-                            2,                     
+                            ARCHIVO,                     
                             file_id,         
                             file_size.to_bytes(8, 'big'),  
                             b'\x00'*50)           
@@ -280,7 +302,7 @@ def enviar_archivo(user_id_to, filepath):
                     #Enviar archivo en chunks
                     total_sent = 0
                     while True:
-                        chunk = f.read(4096)
+                        chunk = f.read(TAM_CHUNK)
                         if not chunk:
                             break
                         tcp_send_socket.sendall(chunk)
@@ -340,7 +362,7 @@ def manejar_archivo(tcp_conn, addr):
             total_recibido = 0
             while tcp_server_running:
                 try:
-                    data = tcp_conn.recv(4096)
+                    data = tcp_conn.recv(TAM_CHUNK)
                     if not data:
                         break  
                     f.write(data)
@@ -355,7 +377,7 @@ def manejar_archivo(tcp_conn, addr):
             
         print(f"\n[LCP] Archivo guardado como {filename}")
         
-        respuesta = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
+        respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
         tcp_conn.sendall(respuesta)
         
         archivos_recibidos.put((addr[0], filename))
@@ -367,7 +389,7 @@ def manejar_archivo(tcp_conn, addr):
     
         if 'tcp_conn' in locals():
             try:
-                respuesta = struct.pack('!B 20s 4s', 2, mi_id, b'\x00'*4)
+                respuesta = struct.pack('!B 20s 4s', ERROR_INTERNO, mi_id, b'\x00'*4)
                 tcp_conn.sendall(respuesta)
             except:
                 pass  
@@ -394,29 +416,29 @@ def escuchar_udp():
             if len(data) >= 41:
                 operation = data[40]
                 
-                if operation == 0:    
+                if operation == ECHO:    
                     manejar_echo(data, addr)
-                elif operation == 1: 
+                elif operation == MENSAJE: 
                     threading.Thread(
                         target=manejar_mensaje,
                         args=(data, addr),
                         daemon=True
                     ).start()
-                elif operation == 2:  
+                elif operation == ARCHIVO:  
                     print("[LCP] Header de archivo recibido")
-                elif operation == 3:  
+                elif operation == CREAR_GRUPO:  
                     threading.Thread(
                         target=manejar_creacion_grupo,
                         args=(data, addr),
                         daemon=True
                     ).start()
-                elif operation == 4:  
+                elif operation == UNIRSE_GRUPO:  
                     threading.Thread(
                         target=manejar_suscripcion_grupo,
                         args=(data, addr),
                         daemon=True
                     ).start()
-                elif operation == 5: 
+                elif operation == MENSAJE_GRUPAL: 
                     threading.Thread(
                         target=manejar_mensaje_grupal,
                         args=(data, addr),
