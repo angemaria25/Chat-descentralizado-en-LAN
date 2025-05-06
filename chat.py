@@ -701,6 +701,10 @@ def salir():
     print("Cerrando sockets y terminando hilos...")
     tcp_server_running = False
     
+    #Limpiar estructuras de grupos
+    grupos.clear()
+    usuarios_grupos.clear()
+    
     if tcp_socket:
         try:
             #Crea una conexión temporal para desbloquear el accept()
