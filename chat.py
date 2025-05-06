@@ -168,33 +168,39 @@ def manejar_mensaje(data, addr):
     
     try:
         user_id_from = data[:20]
+        user_id_to = data[20:40]
         operation = data[40]
         
         if operation == 1:
+            es_broadcast = (user_id_to == BROADCAST_ID)
+            
+            if not es_broadcast:
+                respuesta = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
+                udp_socket.sendto(respuesta, addr)
+                
             body_id = data[41]
             body_length = int.from_bytes(data[42:50], 'big')
         
-            #Enviar confirmación de header
             respuesta = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
             udp_socket.sendto(respuesta, addr)
             
-            # Recibir cuerpo
             udp_socket.settimeout(TIMEOUT)
-            cuerpo_data, _ = udp_socket.recvfrom(body_length + 1)  # +1 por BodyId (1 byte)
+            cuerpo_data, _ = udp_socket.recvfrom(body_length + 1)  
         
-            # --- CAMBIO 3: Verificación con BodyId de 1 byte ---
-            recibido_id = cuerpo_data[0]  # Primer byte = BodyId
+            recibido_id = cuerpo_data[0] 
             if recibido_id != body_id:
                 print("[Error] ID de mensaje no coincide")
                 return
             
-            mensaje = cuerpo_data[1:].decode('utf-8')  # Resto = contenido
-            mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje))
+            mensaje = cuerpo_data[1:].decode('utf-8') 
+            mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje, es_broadcast))
             
-            # Confirmación final
-            confirmacion = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
-            udp_socket.sendto(confirmacion, addr)
-
+            if not es_broadcast:
+                confirmacion = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
+                udp_socket.sendto(confirmacion, addr)
+                
+    except Exception as e:
+        print(f"[Error] Al procesar mensaje: {e}")
 
 def enviar_mensaje_broadcast(mensaje):
     """Envía un mensaje a TODOS los usuarios con una sola transmisión"""
