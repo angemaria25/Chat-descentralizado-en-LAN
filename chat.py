@@ -18,7 +18,8 @@ MENSAJE = 1
 ARCHIVO = 2          
 CREAR_GRUPO = 3      
 UNIRSE_GRUPO = 4     
-MENSAJE_GRUPAL = 5   
+MENSAJE_GRUPAL = 5  
+RECUPERAR_HISTORIAL = 6
 
 #Códigos de respuesta
 OK = 0
