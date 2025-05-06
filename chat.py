@@ -217,7 +217,6 @@ def enviar_mensaje_broadcast(mensaje):
     except Exception as e:
         print(f"[Error] En broadcast: {e}")
 
-
 def manejar_mensaje(data, addr):
     """Procesa mensajes recibidos"""
     
@@ -226,11 +225,11 @@ def manejar_mensaje(data, addr):
         user_id_to = data[20:40]
         operation = data[40]
         
-        if operation == 1:
+        if operation == MENSAJE:
             es_broadcast = (user_id_to == BROADCAST_ID)
             
             if not es_broadcast:
-                respuesta = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
+                respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
                 udp_socket.sendto(respuesta, addr)
                 
             body_id = data[41]
@@ -249,6 +248,14 @@ def manejar_mensaje(data, addr):
             
             mensaje = cuerpo_data[1:].decode('utf-8') 
             
+            if not es_broadcast:
+                with historial_lock:
+                    if user_id_from not in historial_mensajes:
+                        historial_mensajes[user_id_from] = deque(maxlen=10)
+            
+                    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                    historial_mensajes[user_id_from].append((timestamp, mensaje))
+                    
             mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje, es_broadcast))
             
             if not es_broadcast:
