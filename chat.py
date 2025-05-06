@@ -550,7 +550,7 @@ def manejar_suscripcion_grupo(data, addr):
         print(f"[Error] En suscripción a grupo: {e}")
         
 def manejar_mensaje_grupal(data, addr):
-    """Procesa mensaje destinado a un grupo"""
+    """Procesa mensajes destinados a un grupo"""
     
     try:
         user_id_from = data[:20]
@@ -572,12 +572,20 @@ def manejar_mensaje_grupal(data, addr):
             nombre_grupo = grupos[group_id]['nombre']
             miembros = grupos[group_id]['miembros'].copy()
             
+        with historial_lock:
+            if group_id not in historial_grupos:
+                from collections import deque
+                historial_grupos[group_id] = deque(maxlen=10)
+            
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            historial_grupos[group_id].append((user_id_from, timestamp, mensaje))
+            
         mensaje_grupal = f"[GRUPO:{nombre_grupo}] {mensaje}"
         
         #Enviar a cada miembro conectado (excepto remitente)
         for member in miembros:
             if member == user_id_from:
-                continue  #Saltar al remitente
+                continue  
                 
             if member in usuarios_conectados:
                 ip_destino = usuarios_conectados[member][0]
@@ -595,6 +603,48 @@ def manejar_mensaje_grupal(data, addr):
     except Exception as e:
         print(f"[Error] Al procesar mensaje grupal: {e}")
 
+############
+#Historial.
+############
+def enviar_solicitud_historial(user_id):
+    
+    header = struct.pack('!20s 20s B B 8s 50s',
+                        mi_id,          
+                        user_id,       
+                        RECUPERAR_HISTORIAL,
+                        0,             
+                        b'\x00'*8,     
+                        b'\x00'*50)   
+    
+def manejar_solicitud_historial(data, addr):
+    
+    user_id_from = data[:20]  
+    
+    with historial_lock:
+        #Obtengo los últimos 10 mensajes con este usuario
+        mensajes = list(historial_mensajes.get(user_id_from, deque()))
+    
+    #Envio cada mensaje como uno normal
+    for hora, msg in mensajes:
+        enviar_mensaje(user_id_from, f"[HISTORIAL] {hora}: {msg}")
+
+def recuperar_historial_al_conectar():
+    
+    for user_id in usuarios_conectados:
+        if user_id != mi_id:
+            enviar_solicitud_historial(user_id)
+    
+    for group_id in usuarios_grupos.get(mi_id, set()):
+        if group_id in grupos:
+            enviar_solicitud_historial(grupos[group_id]['creador'])
+
+def mostrar_historial_local():
+    print("\nHistorial local almacenado:")
+    for user_id, mensajes in historial_mensajes.items():
+        print(f"\nChat con {user_id.hex()[:8]}...")
+        for hora, msg in mensajes:
+            print(f"{hora}: {msg}")
+            
 #####################
 #Interfaz de usuario.
 #####################
