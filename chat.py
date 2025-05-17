@@ -4,9 +4,10 @@ import socket
 import struct
 import threading 
 from queue import Queue 
+from collections import deque
 
 PUERTO = 9990
-BROADCAST_ADDR = '255.255.255.255'
+BROADCAST_ADDR = '192.168.235.255'
 HEADER_SIZE = 100
 RESPONSE_SIZE = 25
 TIMEOUT = 5
@@ -57,8 +58,8 @@ def iniciar_sockets():
     
     try:
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        #udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
+        #udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
         udp_socket.bind(('0.0.0.0', PUERTO))
         
@@ -823,6 +824,7 @@ def iniciar_chat():
 
 if __name__ == "__main__":
     try:
+        iniciar_chat()
         mostrar_menu()
     except KeyboardInterrupt:
         print("\nInterrumpido por usuario")
