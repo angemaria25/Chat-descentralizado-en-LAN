@@ -27,9 +27,7 @@ OK = 0
 PETICION_INVALIDA = 1
 ERROR_INTERNO = 2
 
-#Configuración
-TAM_MAX_MSJ = 1024              
-TAM_CHUNK = 4096                 
+#Configuración               
 INTERVALO_ECO = 10               
 TIEMPO_INACTIVIDAD = TIMEOUT * 3 
 
@@ -38,6 +36,12 @@ usuarios_conectados = {}
 mensajes_recibidos = Queue()
 archivos_recibidos = Queue()
 tcp_server_running = True
+
+cola_respuestas = Queue()
+cola_echo = Queue()
+cola_mensajes = Queue()
+cola_cuerpos = Queue()
+
 
 grupos = {} 
 usuarios_grupos = {}
@@ -58,15 +62,16 @@ def iniciar_sockets():
     
     try:
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        #udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
-        #udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1) 
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65507)
         udp_socket.bind(('0.0.0.0', PUERTO))
         
         tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tcp_socket.bind(('0.0.0.0', PUERTO))
         tcp_socket.listen(5)
+        tcp_socket.settimeout(1) # Para chequeos periódicos
         
         print(f"[Red] Sockets iniciados en puerto {PUERTO}")
         print(f"Tu ID: {mi_id.hex()}")
@@ -83,13 +88,65 @@ def iniciar_servicios():
     threading.Thread(target=escuchar_tcp, daemon=True).start()
     threading.Thread(target=enviar_echos_periodicos, daemon=True).start()
     threading.Thread(target=verificar_inactivos, daemon=True).start()
+    threading.Thread(target=mostrar_mensajes, daemon=True).start()
+
+def lector_udp():
+    while tcp_server_running:
+        try:
+            data, addr = udp_socket.recvfrom(65507)
+            if len(data) >= 41:
+                op = data[40]
+                if op == ECHO:
+                    cola_echo.put((data, addr))
+                elif op == MENSAJE:
+                    cola_mensajes.put((data, addr))
+                elif op in (OK, PETICION_INVALIDA, ERROR_INTERNO):
+                    cola_respuestas.put(data)
+                else:
+                    cola_cuerpos.put((data, addr))
+            elif len(data) > 0:
+                cola_cuerpos.put((data, addr))
+        except socket.timeout:
+            continue
+        except Exception as e:
+            print(f"[Error UDP lector central]: {e}")
+
+
+def procesar_echo():
+    while True:
+        data, addr = cola_echo.get()
+        manejar_echo(data, addr)
+
+def procesar_mensajes():
+    while True:
+        data, addr = cola_mensajes.get()
+        manejar_mensaje(data, addr)
+
+def procesar_cuerpos():
+    while True:
+        data, addr = cola_cuerpos.get()
+        if len(data) >= 2:
+            mensaje_id = data[0]
+            mensaje = data[1:].decode('utf-8', errors='ignore')
+            user_id_from = None
+            for uid, (ip, _) in usuarios_conectados.items():
+                if ip == addr[0]:
+                    user_id_from = uid
+                    break
+            if user_id_from:
+                with historial_lock:
+                    if user_id_from not in historial_mensajes:
+                        historial_mensajes[user_id_from] = deque(maxlen=10)
+                    historial_mensajes[user_id_from].append((time.strftime("%H:%M:%S"), mensaje))
+                mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje, False))
+                confirmacion = struct.pack('!B20s4s', OK, mi_id, b'\x00'*4)
+                udp_socket.sendto(confirmacion, addr)
 
 ###########################################
 #Operación 0: Echo-Reply (Descubrimiento).
 ###########################################
 def enviar_echo():
     """Envía mensaje de descubrimiento a toda la red según LCP (Operación 0)"""
-    
     try:
         header = struct.pack('!20s 20s B B 8s 50s',
                             mi_id,     
@@ -100,21 +157,22 @@ def enviar_echo():
                             b'\x00'*50)             
         
         udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
-        
     except Exception as e:
         print(f"[Error] Al enviar echo: {e}")
 
 def manejar_echo(data, addr):
     """Procesa mensaje Echo recibido según LCP"""
-    
     try:
         user_id_from = data[:20]
         
         if user_id_from == mi_id:
             return
         
-        #Zona crítica (protegemos el acceso al diccionario)
         with usuarios_lock:
+            if (user_id_from not in usuarios_conectados or 
+                usuarios_conectados[user_id_from][0] != addr[0]):
+                print(f"[LCP] Usuario descubierto: {user_id_from.hex()} desde {addr[0]}")
+            
             usuarios_conectados[user_id_from] = (addr[0], time.time())
         
         print(f"[LCP] Usuario descubierto: {user_id_from.hex()} desde {addr[0]}")
@@ -134,27 +192,18 @@ def manejar_echo(data, addr):
 ################################
 def enviar_mensaje(user_id_to, mensaje, max_retries=3):
     """Envía un mensaje con reintentos completos desde el header"""
-    
     if user_id_to not in usuarios_conectados:
         print(f"[Error] Usuario {user_id_to.hex()} no encontrado")
         return False
     
     ip_destino = usuarios_conectados[user_id_to][0]
     mensaje_bytes = mensaje.encode('utf-8')
-    
-    if len(mensaje_bytes) > TAM_MAX_MSJ:
-        print(f"[Error] Mensaje demasiado largo (máx {TAM_MAX_MSJ} bytes)")
-        return False
-    
     mensaje_id = int(time.time() * 1000) % 256
-    retry_delay = 1  
+    retry_delay = 1
     
     for attempt in range(max_retries):
         try:
-            if attempt > 0:
-                print(f"\nReintentando mensaje ({attempt}/{max_retries})...")
-                time.sleep(retry_delay)
-                retry_delay *= 2 
+            udp_socket.settimeout(TIMEOUT + attempt)
             
             header = struct.pack('!20s 20s B B 8s 50s',
                                 mi_id, 
@@ -163,36 +212,23 @@ def enviar_mensaje(user_id_to, mensaje, max_retries=3):
                                 mensaje_id,
                                 len(mensaje_bytes).to_bytes(8, 'big'), 
                                 b'\x00'*50)
-                
-            udp_socket.settimeout(TIMEOUT)
             udp_socket.sendto(header, (ip_destino, PUERTO))
-            
-            try:
-                respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
-                if respuesta[0] != OK:
-                    print("[Error] Receptor no aceptó el mensaje")
-                    continue  
-            except socket.timeout:
-                print("[Timeout] Esperando confirmación de header")
-                continue  
-            
+            respuesta = cola_respuestas.get(timeout=TIMEOUT)
+            if respuesta[0] != OK:
+                print(f"[Error] Receptor reportó error: {respuesta[0]}")
+                time.sleep(retry_delay)
+                retry_delay *= 2 
+                continue
             cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
             udp_socket.sendto(cuerpo, (ip_destino, PUERTO))
-            
-            try:
-                respuesta, _ = udp_socket.recvfrom(RESPONSE_SIZE)
-                if respuesta[0] == OK:
-                    print(f"[Éxito] Mensaje enviado a {user_id_to.hex()}")
-                    return True
-                else:
-                    print("[Error] Confirmación fallida")
-            except socket.timeout:
-                print("[Timeout] Esperando confirmación final")
-                
+            respuesta = cola_respuestas.get(timeout=TIMEOUT)
+            if respuesta[0] == OK:
+                print(f"[Éxito] Mensaje enviado a {user_id_to.hex()}")
+                return True
         except Exception as e:
-            print(f"[Error] Intento {attempt} fallido: {e}")
-            continue
-    
+            print(f"[Error intento {attempt + 1}]: {e}")
+            time.sleep(retry_delay)
+            retry_delay *= 2
     print(f"[Fallo] No se pudo enviar después de {max_retries} intentos")
     return False
 
@@ -220,51 +256,28 @@ def enviar_mensaje_broadcast(mensaje):
 
 def manejar_mensaje(data, addr):
     """Procesa mensajes recibidos"""
-    
     try:
         user_id_from = data[:20]
         user_id_to = data[20:40]
         operation = data[40]
         
-        if operation == MENSAJE:
-            es_broadcast = (user_id_to == BROADCAST_ID)
-            
-            if not es_broadcast:
-                respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
-                udp_socket.sendto(respuesta, addr)
-                
-            body_id = data[41]
-            body_length = int.from_bytes(data[42:50], 'big')
-        
+        if operation != MENSAJE:
+            return 
+        if user_id_to != BROADCAST_ID:
             respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
             udp_socket.sendto(respuesta, addr)
-            
-            udp_socket.settimeout(TIMEOUT)
-            cuerpo_data, _ = udp_socket.recvfrom(body_length + 1)  
-        
-            recibido_id = cuerpo_data[0] 
-            if recibido_id != body_id:
-                print("[Error] ID de mensaje no coincide")
-                return
-            
-            mensaje = cuerpo_data[1:].decode('utf-8') 
-            
-            if not es_broadcast:
-                with historial_lock:
-                    if user_id_from not in historial_mensajes:
-                        historial_mensajes[user_id_from] = deque(maxlen=10)
-            
-                    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-                    historial_mensajes[user_id_from].append((timestamp, mensaje))
-                    
-            mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje, es_broadcast))
-            
-            if not es_broadcast:
-                confirmacion = struct.pack('!B 20s 4s', 0, mi_id, b'\x00'*4)
-                udp_socket.sendto(confirmacion, addr)
-                
     except Exception as e:
         print(f"[Error] Al procesar mensaje: {e}")
+
+def mostrar_mensajes():
+    """Saca mensajes de la cola y los imprime en pantalla."""
+    while True:
+        try:
+            user_id_from, hora, mensaje, es_broadcast = mensajes_recibidos.get()
+            tipo = "[Broadcast]" if es_broadcast else "[Privado]"
+            print(f"{tipo} {hora} - {user_id_from.hex()}: {mensaje}")
+        except Exception as e:
+            print(f"[Error mostrando mensaje]: {e}")
 
 ########################################################
 #Operación 2: Send File-Ack (Transferencia de archivos).
@@ -421,10 +434,9 @@ def manejar_archivo(tcp_conn, addr):
 ###############################
 def escuchar_udp():
     """Escucha mensajes UDP y crea un hilo para cada mensaje"""
-    
     while tcp_server_running:
         try:
-            data, addr = udp_socket.recvfrom(HEADER_SIZE)
+            data, addr = udp_socket.recvfrom(65507)
             
             if not tcp_server_running:  
                 break
@@ -462,9 +474,7 @@ def escuchar_udp():
                     ).start()
                 else:
                     print(f"[LCP] Operación desconocida: {operation}")
-        except socket.error as e:
-            if tcp_server_running:  
-                print(f"[Error] UDP: {e}")
+        except socket.timeout:
             continue
         except Exception as e:
             print(f"[Error] Inesperado en UDP: {e}")
@@ -485,12 +495,11 @@ def escuchar_tcp():
 
 def verificar_inactivos():
     """Elimina usuarios inactivos según timeout"""
-    
     while True:
         time.sleep(10)
         ahora = time.time()
         inactivos = [uid for uid, (_, last) in usuarios_conectados.items() 
-                    if ahora - last > TIMEOUT * 3]
+                    if ahora - last > TIMEOUT * 90]
         
         for uid in inactivos:
             print(f"[LCP] Usuario {uid.hex()} eliminado por inactividad")
@@ -656,35 +665,41 @@ def mostrar_menu():
     """Muestra el menú principal y maneja las opciones"""
     
     while True:
-        print("\n--- Chat LAN ---")
-        print("1. Listar usuarios")
-        print("2. Enviar mensaje directo")
-        print("3. Enviar mensaje a TODOS (broadcast)")
-        print("4. Enviar archivo")
-        print("5. Ver mensajes")
-        print("6. Ver archivos")
-        print("7. Salir")
-        
-        opcion = input("Seleccione: ")
-        
-        if opcion == "1":
-            listar_usuarios()
-        elif opcion == "2":
-            enviar_mensaje_menu()
-        elif opcion == "3":
-            mensaje = input("Mensaje para TODOS los usuarios: ")
-            enviar_mensaje_broadcast(mensaje)
-        elif opcion == "4":
-            enviar_archivo_menu()
-        elif opcion == "5":
-            ver_mensajes()
-        elif opcion == "6":
-            ver_archivos()
-        elif opcion == "7":
-            salir()
-            break
-        else:
-            print("Opción inválida")
+        try:
+            print("\n--- Chat LAN ---")
+            print("1. Listar usuarios")
+            print("2. Enviar mensaje directo")
+            print("3. Enviar mensaje a TODOS (broadcast)")
+            print("4. Enviar archivo")
+            print("5. Ver mensajes")
+            print("6. Ver archivos")
+            print("7. Salir")
+            
+            opcion = input("Seleccione: ").strip()
+            
+            if opcion == "1":
+                listar_usuarios()
+            elif opcion == "2":
+                enviar_mensaje_menu()
+            elif opcion == "3":
+                mensaje = input("Ingrese el mensaje para todos: ")
+                enviar_mensaje_broadcast(mensaje)
+            elif opcion == "4":
+                enviar_archivo_menu()
+            elif opcion == "5":
+                ver_mensajes()
+            elif opcion == "6":
+                ver_archivos()
+            elif opcion == "7":
+                salir()
+                break
+            else:
+                print("Opción inválida")
+        except KeyboardInterrupt:
+            print("\nPara salir, seleccione la opción 7 o presione Ctrl+C nuevamente.")
+            continue
+        except Exception as e:
+            print(f"[Error] En el menú: {str(e)}")
             
 def listar_usuarios():
     """Lista de usuarios conectados"""
@@ -783,26 +798,34 @@ def ver_archivos():
 
 def salir():
     """Cierra la aplicación"""
-    
     global tcp_server_running, udp_socket, tcp_socket
     
     print("Cerrando sockets y terminando hilos...")
     tcp_server_running = False
     
-    #Limpiar estructuras de grupos
     grupos.clear()
     usuarios_grupos.clear()
     
+    # Enviar mensaje de despedida a todos los usuarios
+    with usuarios_lock:
+        for user_id in usuarios_conectados.copy():
+            try:
+                enviar_mensaje(user_id, "[SISTEMA] Usuario saliendo de la red")
+            except:
+                pass
+    
     if tcp_socket:
         try:
-            #Crea una conexión temporal para desbloquear el accept()
             temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            temp_socket.connect(('localhost', PUERTO))
+            temp_sock.settimeout(1)
+            try:
+                temp_socket.connect(('localhost', PUERTO))
+            except:
+                pass
             temp_socket.close()
-            
             tcp_socket.close()
         except Exception as e:
-            print(f"[Error] Al cerrar socket TCP: {e}")
+            print(f"[Error] Al cerrar socket TCP: {str(e)}")
             
     if udp_socket:
         try:
@@ -810,16 +833,13 @@ def salir():
         except Exception as e:
             print(f"[Error] Al cerrar socket UDP: {e}")
     
-    time.sleep(0.5)
+    time.sleep(1)  # Dar tiempo a que los hilos terminen
     print("Saliendo del programa...")
-    os._exit(0)  #Fuerza la salida de todos los hilos
 
 def iniciar_chat():
     """Función para iniciar todos los servicios del chat"""
-    
     iniciar_sockets()
     iniciar_servicios()
-    
     print("Servicio de chat iniciado correctamente")
 
 if __name__ == "__main__":
