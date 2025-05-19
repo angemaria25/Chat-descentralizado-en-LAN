@@ -392,12 +392,7 @@ def enviar_echo():
     udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
 
 def enviar_mensaje(user_id_to, mensaje, es_broadcast=False):
-    """
-    Envía un mensaje a un usuario específico o a todos (broadcast)
-    :param user_id_to: ID del destinatario (usar BROADCAST_ID para broadcast)
-    :param mensaje: Mensaje a enviar
-    :param es_broadcast: Indica si es un mensaje broadcast
-    """
+    """Envía un mensaje a un usuario específico o a todos (broadcast)"""
     if not es_broadcast and user_id_to not in usuarios_conectados:
         print("❌ Usuario no encontrado en la lista de conectados.")
         return
