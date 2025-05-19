@@ -21,6 +21,8 @@ ECHO = 0
 MENSAJE = 1 
 ARCHIVO = 2 
 CREAR_GRUPO = 3 
+UNIRSE_A_GRUPO = 4
+
 
 #Códigos de respuesta
 OK = 0
@@ -47,6 +49,9 @@ cola_respuestas = Queue()
 mensajes_recibidos = Queue()
 cola_transferencias = Queue()
 
+cola_creacion = Queue()
+cola_union = Queue()
+
 mensaje_headers = {}  
 mensaje_headers_lock = threading.Lock()
 
@@ -69,6 +74,8 @@ def iniciar_servicios():
     threading.Thread(target=autodescubrimiento_continuo, daemon=True).start()
     threading.Thread(target=verificar_inactividad, daemon=True).start()
     threading.Thread(target=procesar_creacion_grupos, daemon=True).start()
+    threading.Thread(target=procesar_union_a_grupos, daemon=True).start()
+    
     for _ in range(5):
         threading.Thread(target=procesar_mensajes, daemon=True).start()
 
@@ -87,7 +94,9 @@ def lector_udp():
                 elif op == ARCHIVO:
                     cola_transferencias.put((data, addr))
                 elif op == CREAR_GRUPO:
-                    cola_mensajes.put((data, addr))
+                    cola_creacion.put((data, addr))
+                elif op == UNIRSE_A_GRUPO:
+                    cola_union.put((data, addr))
                 else:
                     print(f"[LCP] Operación desconocida: {op}")
             elif len(data) > 0:
@@ -229,7 +238,7 @@ def procesar_transferencias():
 
 def procesar_creacion_grupos():
     while True:
-        data, addr = cola_mensajes.get()
+        data, addr = cola_creacion.get()
         try:
             user_id_from = data[:20]
             user_id_to = data[20:40]
@@ -240,10 +249,6 @@ def procesar_creacion_grupos():
                 time.sleep(0.01)
                 continue
             
-            #Ignorar el paquete si yo lo envié
-            if user_id_from == mi_id:
-                continue
-
             nombre_grupo = data[41:].decode('utf-8').strip()
             if not nombre_grupo:
                 continue
@@ -251,9 +256,13 @@ def procesar_creacion_grupos():
             with grupos_lock:
                 if nombre_grupo not in grupos_creados:
                     grupos_creados[nombre_grupo] = [user_id_from]
-                    print(f"👥 Grupo '{nombre_grupo}' creado por {user_id_from.hex()[:8]}")
+                    if user_id_from == mi_id:
+                        print(f"✅ Has creado el grupo '{nombre_grupo}'")
+                    else:
+                        print(f"👥 Grupo '{nombre_grupo}' creado por {user_id_from.hex()[:8]}")
                 else:
-                    print(f"⚠️ Grupo '{nombre_grupo}' ya existe")
+                    if user_id_from == mi_id:
+                        print(f"⚠️ Ya existe un grupo con el nombre '{nombre_grupo}'")
 
         except Exception as e:
             print(f"[Error procesar creación grupo]: {e}")
@@ -264,15 +273,56 @@ def crear_grupo(nombre_grupo):
         if len(nombre_bytes) > 59:
             print("❌ Nombre de grupo demasiado largo (máx. 59 bytes).")
             return
-
+                
         header = struct.pack('!20s 20s B', mi_id, BROADCAST_ID, CREAR_GRUPO) + nombre_bytes.ljust(59, b'\x00')
-        print(f"✅ Has creado el grupo '{nombre_grupo}'")
         udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
-
+        
     except Exception as e:
         print(f"❌ Error al crear grupo: {e}")
 
 
+def unirse_a_grupo(nombre_grupo):
+    try:
+        nombre_bytes = nombre_grupo.encode('utf-8')
+        if len(nombre_bytes) > 59:
+            print("❌ Nombre de grupo demasiado largo (máx. 59 bytes).")
+            return
+
+        header = struct.pack('!20s 20s B', mi_id, BROADCAST_ID, UNIRSE_A_GRUPO) + nombre_bytes.ljust(59, b'\x00')
+        udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
+    except Exception as e:
+        print(f"❌ Error al unirse al grupo: {e}")
+
+def procesar_union_a_grupos():
+    while True:
+        data, addr = cola_union.get()
+        try:
+            user_id_from = data[:20]
+            op_code = data[40]
+
+            if op_code != UNIRSE_A_GRUPO:
+                cola_mensajes.put((data, addr))
+                time.sleep(0.01)
+                continue
+
+            nombre_grupo = data[41:].decode('utf-8').strip()
+            if not nombre_grupo:
+                continue
+
+            with grupos_lock:
+                if nombre_grupo in grupos_creados:
+                    if user_id_from not in grupos_creados[nombre_grupo]:
+                        grupos_creados[nombre_grupo].append(user_id_from)
+                        print(f"✅ {user_id_from.hex()[:8]} se ha unido al grupo '{nombre_grupo}'")
+                    else:
+                        if user_id_from == mi_id:
+                            print(f"Ya estás en el grupo '{nombre_grupo}'")
+                else:
+                    if user_id_from == mi_id:
+                        print(f"⚠️ Grupo '{nombre_grupo}' no existe")
+
+        except Exception as e:
+            print(f"[Error procesar unión a grupo]: {e}")
 
 
 def servidor_tcp():
@@ -458,6 +508,7 @@ def mostrar_menu():
         print("4. Enviar archivo a usuario")
         print("5. Salir")
         print("6. Crear grupo")
+        print("7. Unirse a grupo existente")
         opcion = input("Opción: ").strip()
         
         if opcion == "1":
@@ -527,6 +578,16 @@ def mostrar_menu():
                 crear_grupo(nombre_grupo)
             else:
                 print("❌ Nombre de grupo vacío.")
+        elif opcion == "7":
+            with grupos_lock:
+                if not grupos_creados:
+                    print("📭 No hay grupos disponibles.")
+                else:
+                    print("📚 Grupos disponibles:")
+                    for nombre in grupos_creados:
+                        print(f" - {nombre}")
+                    nombre_grupo = input("Ingresa el nombre del grupo al que deseas unirte: ").strip()
+                    unirse_a_grupo(nombre_grupo)
         else:
             print("❌ Opción no válida. Intente nuevamente.")
 
