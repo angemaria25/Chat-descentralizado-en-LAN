@@ -22,7 +22,7 @@ MENSAJE = 1
 ARCHIVO = 2 
 CREAR_GRUPO = 3 
 UNIRSE_A_GRUPO = 4
-
+MENSAJE_GRUPAL = 5 
 
 #Códigos de respuesta
 OK = 0
@@ -73,12 +73,12 @@ def iniciar_servicios():
     threading.Thread(target=servidor_tcp, daemon=True).start()
     threading.Thread(target=autodescubrimiento_continuo, daemon=True).start()
     threading.Thread(target=verificar_inactividad, daemon=True).start()
-    threading.Thread(target=procesar_creacion_grupos, daemon=True).start()
-    threading.Thread(target=procesar_union_a_grupos, daemon=True).start()
-    
+
     for _ in range(5):
         threading.Thread(target=procesar_mensajes, daemon=True).start()
-
+        threading.Thread(target=procesar_creacion_grupos, daemon=True).start()
+        threading.Thread(target=procesar_union_a_grupos, daemon=True).start()
+    
 def lector_udp():
     while tcp_server_running:
         try:
@@ -97,6 +97,8 @@ def lector_udp():
                     cola_creacion.put((data, addr))
                 elif op == UNIRSE_A_GRUPO:
                     cola_union.put((data, addr))
+                elif op == MENSAJE_GRUPAL:
+                    cola_mensajes.put((data, addr)) 
                 else:
                     print(f"[LCP] Operación desconocida: {op}")
             elif len(data) > 0:
@@ -162,6 +164,21 @@ def procesar_mensajes():
                 respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
                 udp_socket.sendto(respuesta, addr)
 
+            elif op_code == MENSAJE_GRUPAL:
+                nombre_grupo = data[50:100].rstrip(b'\x00').decode('utf-8').strip().lower()
+
+                with grupos_lock:
+                    if nombre_grupo not in grupos_creados or mi_id not in grupos_creados[nombre_grupo]:
+                        continue       
+
+                with mensaje_headers_lock:
+                    mensaje_headers[mensaje_id] = {
+                        'es_broadcast': False,          
+                        'grupo': nombre_grupo,
+                        'from' : user_id_from
+                    }
+                respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
+                udp_socket.sendto(respuesta, addr)
         except Exception as e:
             print(f"[Error al procesar mensaje]: {e}")
             
@@ -180,36 +197,38 @@ def procesar_cuerpos():
             
         es_broadcast = False
         user_id_from = None
+        nombre_grupo = None
         
         with mensaje_headers_lock:
             header_info = mensaje_headers.pop(mensaje_id, None) 
         
         if header_info:
-            es_broadcast = header_info['es_broadcast']
             user_id_from = header_info['from']
+            es_broadcast = header_info['es_broadcast']
+            nombre_grupo = header_info.get('grupo') 
         else:
             with usuarios_lock:
                 for uid, (ip, _) in usuarios_conectados.items():
                     if ip == addr[0]:
                         user_id_from = uid
                         break
-
+                    
         if user_id_from:
+            hora = time.strftime("%H:%M:%S")
             with historial_lock:
-                if es_broadcast:
-                    historial_mensajes.setdefault(BROADCAST_ID, deque(maxlen=50)).append(
-                        (time.strftime("%H:%M:%S"), mensaje, user_id_from))
+                if nombre_grupo:
+                    historial_mensajes.setdefault(nombre_grupo, deque(maxlen=50)).append((hora, mensaje, user_id_from))
+                elif es_broadcast:
+                    historial_mensajes.setdefault(BROADCAST_ID, deque(maxlen=50)).append((hora, mensaje, user_id_from))
                 else:
-                    historial_mensajes.setdefault(user_id_from, deque(maxlen=10)).append(
-                        (time.strftime("%H:%M:%S"), mensaje))
+                    historial_mensajes.setdefault(user_id_from, deque(maxlen=10)).append((hora, mensaje))
 
-            mensajes_recibidos.put((user_id_from, time.strftime("%H:%M:%S"), mensaje, es_broadcast))
+            mensajes_recibidos.put((user_id_from, hora, mensaje, es_broadcast, nombre_grupo))
 
-            if not es_broadcast:
+            if not es_broadcast and not nombre_grupo:
                 respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
                 udp_socket.sendto(respuesta, addr)
                     
-        
 def procesar_transferencias():
     """Procesa los headers de transferencia de archivos"""
     while True:
@@ -245,17 +264,19 @@ def procesar_creacion_grupos():
             op_code = data[40]
 
             if op_code != CREAR_GRUPO:
-                cola_mensajes.put((data, addr)) 
+                cola_mensaje.put((data, addr)) 
                 time.sleep(0.01)
                 continue
             
-            nombre_grupo = data[41:].decode('utf-8').strip()
+            nombre_grupo = data[41:].rstrip(b'\x00').decode('utf-8').strip()
             if not nombre_grupo:
                 continue
             
             with grupos_lock:
                 if nombre_grupo not in grupos_creados:
                     grupos_creados[nombre_grupo] = [user_id_from]
+                    print(f"[DEBUG] Grupos después de crear/unirse: {list(grupos_creados.keys())}")
+
                     if user_id_from == mi_id:
                         print(f"✅ Has creado el grupo '{nombre_grupo}'")
                     else:
@@ -279,7 +300,6 @@ def crear_grupo(nombre_grupo):
         
     except Exception as e:
         print(f"❌ Error al crear grupo: {e}")
-
 
 def unirse_a_grupo(nombre_grupo):
     try:
@@ -305,7 +325,7 @@ def procesar_union_a_grupos():
                 time.sleep(0.01)
                 continue
 
-            nombre_grupo = data[41:].decode('utf-8').strip()
+            nombre_grupo = data[41:].rstrip(b'\x00').decode('utf-8').strip()
             if not nombre_grupo:
                 continue
 
@@ -313,6 +333,8 @@ def procesar_union_a_grupos():
                 if nombre_grupo in grupos_creados:
                     if user_id_from not in grupos_creados[nombre_grupo]:
                         grupos_creados[nombre_grupo].append(user_id_from)
+                        print(f"[DEBUG] Grupos después de crear/unirse: {list(grupos_creados.keys())}")
+
                         print(f"✅ {user_id_from.hex()[:8]} se ha unido al grupo '{nombre_grupo}'")
                     else:
                         if user_id_from == mi_id:
@@ -324,6 +346,35 @@ def procesar_union_a_grupos():
         except Exception as e:
             print(f"[Error procesar unión a grupo]: {e}")
 
+def enviar_mensaje_grupal(nombre_grupo, mensaje):
+    with grupos_lock:
+        if nombre_grupo not in grupos_creados:
+            print("❌ No existe ese grupo.")
+            return
+        elif mi_id not in grupos_creados[nombre_grupo]:
+            print("❌ No perteneces a ese grupo.")
+            return
+
+    nombre_bytes = nombre_grupo.encode('utf-8')
+    if len(nombre_bytes) > 50:
+        print("❌ Nombre de grupo > 50 bytes.")
+        return
+
+    mensaje_bytes = mensaje.encode('utf-8')
+    mensaje_id = int(time.time()*1000) % 256
+
+    header = struct.pack('!20s 20s B B 8s 50s',
+                            mi_id,
+                            BROADCAST_ID,           
+                            MENSAJE_GRUPAL,
+                            mensaje_id,
+                            len(mensaje_bytes).to_bytes(8,'big'),
+                            nombre_bytes.ljust(50,b'\x00'))
+
+    udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
+    cuerpo = struct.pack('!B', mensaje_id) + mensaje_bytes
+    udp_socket.sendto(cuerpo, (BROADCAST_ADDR, PUERTO))
+    print(f"📢 Mensaje enviado al grupo '{nombre_grupo}'.")
 
 def servidor_tcp():
     """Servidor TCP para recibir archivos"""
@@ -428,7 +479,6 @@ def enviar_mensaje(user_id_to, mensaje, es_broadcast=False):
                 print("✅ Mensaje enviado correctamente.")
             else:
                 print(f"❌ Error en respuesta al cuerpo: código {respuesta[0]}")
-
     except Exception as e:
         print(f"❌ Excepción al enviar mensaje: {e}")
 
@@ -487,8 +537,11 @@ def enviar_archivo(user_id_to, file_path):
 
 def mostrar_mensajes_auto():
     while True:
-        uid, hora, msg, es_broadcast = mensajes_recibidos.get()
-        if es_broadcast:
+        
+        uid, hora, msg, es_broadcast, nombre_grupo = mensajes_recibidos.get()
+        if nombre_grupo:
+            print(f"👥 [Grupo {nombre_grupo}] {hora} - {uid.hex()[:8]}: {msg}")
+        elif es_broadcast:
             print(f"📢 [Broadcast] {hora} - {uid.hex()[:8]}: {msg}")
         else:
             print(f"📩 [Privado] {hora} - {uid.hex()[:8]}: {msg}")
@@ -504,6 +557,7 @@ def mostrar_menu():
         print("5. Salir")
         print("6. Crear grupo")
         print("7. Unirse a grupo existente")
+        print("8. Enviar mensaje a grupo")
         opcion = input("Opción: ").strip()
         
         if opcion == "1":
@@ -583,6 +637,18 @@ def mostrar_menu():
                         print(f" - {nombre}")
                     nombre_grupo = input("Ingresa el nombre del grupo al que deseas unirte: ").strip()
                     unirse_a_grupo(nombre_grupo)
+        elif opcion == "8":
+            with grupos_lock:
+                if not grupos_creados:
+                    print("📭 No hay grupos.")
+                    continue
+                print("=== TUS GRUPOS ===")
+                for g in grupos_creados:
+                    if mi_id in grupos_creados[g]:
+                        print(" -", g)
+            nombre = input("Grupo destino: ").strip()
+            texto  = input("Mensaje: ")
+            enviar_mensaje_grupal(nombre, texto)
         else:
             print("❌ Opción no válida. Intente nuevamente.")
 
