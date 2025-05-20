@@ -177,10 +177,8 @@ def procesar_mensajes():
                             'es_broadcast': user_id_to == BROADCAST_ID,
                             'from': user_id_from
                         }
-
                     respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
                     udp_socket.sendto(respuesta, addr)
-
         except Exception as e:
             print(f"[Error al procesar mensaje]: {e}")
             
@@ -214,7 +212,6 @@ def procesar_cuerpos():
                     if ip == addr[0]:
                         user_id_from = uid
                         break
-                    
         if user_id_from:
             hora = time.strftime("%H:%M:%S")
             with historial_lock:
@@ -227,7 +224,6 @@ def procesar_cuerpos():
                     mensajes_recibidos.put((user_id_from, hora, mensaje, False, None))
                     
             mensajes_recibidos.put((user_id_from, hora, mensaje, es_broadcast, nombre_grupo))
-
             if not es_broadcast and not nombre_grupo:
                 respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
                 udp_socket.sendto(respuesta, addr)
@@ -278,8 +274,6 @@ def procesar_creacion_grupos():
             with grupos_lock:
                 if nombre_grupo not in grupos_creados:
                     grupos_creados[nombre_grupo] = [user_id_from]
-                    print(f"[DEBUG] Grupos después de crear/unirse: {list(grupos_creados.keys())}")
-
                     if user_id_from == mi_id:
                         print(f"✅ Has creado el grupo '{nombre_grupo}'")
                     else:
@@ -287,7 +281,6 @@ def procesar_creacion_grupos():
                 else:
                     if user_id_from == mi_id:
                         print(f"⚠️ Ya existe un grupo con el nombre '{nombre_grupo}'")
-
         except Exception as e:
             print(f"[Error procesar creación grupo]: {e}")
 
@@ -297,10 +290,8 @@ def crear_grupo(nombre_grupo):
         if len(nombre_bytes) > 59:
             print("❌ Nombre de grupo demasiado largo (máx. 59 bytes).")
             return
-                
         header = struct.pack('!20s 20s B', mi_id, BROADCAST_ID, CREAR_GRUPO) + nombre_bytes.ljust(59, b'\x00')
         udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
-        
     except Exception as e:
         print(f"❌ Error al crear grupo: {e}")
 
@@ -310,7 +301,6 @@ def unirse_a_grupo(nombre_grupo):
         if len(nombre_bytes) > 59:
             print("❌ Nombre de grupo demasiado largo (máx. 59 bytes).")
             return
-
         header = struct.pack('!20s 20s B', mi_id, BROADCAST_ID, UNIRSE_A_GRUPO) + nombre_bytes.ljust(59, b'\x00')
         udp_socket.sendto(header, (BROADCAST_ADDR, PUERTO))
     except Exception as e:
@@ -336,8 +326,6 @@ def procesar_union_a_grupos():
                 if nombre_grupo in grupos_creados:
                     if user_id_from not in grupos_creados[nombre_grupo]:
                         grupos_creados[nombre_grupo].append(user_id_from)
-                        print(f"[DEBUG] Grupos después de crear/unirse: {list(grupos_creados.keys())}")
-
                         print(f"✅ {user_id_from.hex()[:8]} se ha unido al grupo '{nombre_grupo}'")
                     else:
                         if user_id_from == mi_id:
@@ -345,7 +333,6 @@ def procesar_union_a_grupos():
                 else:
                     if user_id_from == mi_id:
                         print(f"⚠️ Grupo '{nombre_grupo}' no existe")
-
         except Exception as e:
             print(f"[Error procesar unión a grupo]: {e}")
 
@@ -418,17 +405,14 @@ def manejar_conexion_tcp(conn, addr):
                     break
                 f.write(chunk)
                 remaining_bytes -= len(chunk)
-                
         if remaining_bytes == 0:
             print(f"✅ Archivo {file_id.hex()} recibido correctamente")
             conn.sendall(struct.pack('!B', OK))
         else:
             print(f"❌ Archivo {file_id.hex()} incompleto")
             conn.sendall(struct.pack('!B', ERROR_INTERNO))
-            
         with archivos_lock:
             archivos_pendientes.pop(file_id, None)
-            
     except Exception as e:
         print(f"[Error al recibir archivo]: {e}")
     finally:
