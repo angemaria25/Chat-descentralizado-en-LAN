@@ -219,11 +219,11 @@ def procesar_cuerpos():
             hora = time.strftime("%H:%M:%S")
             with historial_lock:
                 if nombre_grupo:
-                    historial_mensajes.setdefault(nombre_grupo, deque(maxlen=50)).append((hora, mensaje, user_id_from))
+                    historial_mensajes.setdefault(nombre_grupo, deque(maxlen=50)).append((hora, mensaje, 'recibido', user_id_from))
                 elif es_broadcast:
-                    historial_mensajes.setdefault(BROADCAST_ID, deque(maxlen=50)).append((hora, mensaje, user_id_from))
+                    historial_mensajes.setdefault(BROADCAST_ID, deque(maxlen=50)).append((hora, mensaje, 'recibido', user_id_from))
                 else:
-                    historial_mensajes.setdefault(user_id_from, deque(maxlen=10)).append((hora, mensaje))
+                    historial_mensajes.setdefault(user_id_from, deque(maxlen=10)).append((hora, mensaje, 'recibido'))
 
             mensajes_recibidos.put((user_id_from, hora, mensaje, es_broadcast, nombre_grupo))
 
@@ -479,8 +479,12 @@ def enviar_mensaje(user_id_to, mensaje, es_broadcast=False):
             respuesta = cola_respuestas.get(timeout=5)
             if respuesta[0] == OK:
                 print("✅ Mensaje enviado correctamente.")
+                hora = time.strftime("%H:%M:%S")
+                with historial_lock:
+                    historial_mensajes.setdefault(user_id_to, deque(maxlen=10)).append((hora, mensaje, 'enviado'))
             else:
                 print(f"❌ Error en respuesta al cuerpo: código {respuesta[0]}")
+            
     except Exception as e:
         print(f"❌ Excepción al enviar mensaje: {e}")
 
@@ -545,6 +549,18 @@ def mostrar_mensajes_auto():
         else:
             print(f"📩 [Privado] {hora} - {uid.hex()[:8]}: {msg}")
 
+def mostrar_historial(user_id):
+    with historial_lock:
+        if user_id not in historial_mensajes or not historial_mensajes[user_id]:
+            print("\nNo hay historial de mensajes con este usuario.")
+            return
+            
+        print(f"\n=== ÚLTIMOS 10 MENSAJES CON {user_id.hex()[:8]} ===")
+        for hora, mensaje, tipo in list(historial_mensajes[user_id])[-10:]:  # Mostrar solo los últimos 10
+            prefix = "Tú:" if tipo == 'enviado' else "Ell@:"
+            print(f"[{hora}] {prefix} {mensaje}")
+
+
 def mostrar_menu():
     while True:
         print("\n=== MENÚ PRINCIPAL ===")
@@ -556,7 +572,8 @@ def mostrar_menu():
         print("5. Crear grupo")
         print("6. Unirse a grupo existente")
         print("7. Enviar mensaje a grupo")
-        print("8. Salir")
+        print("8. Ver historial de mensajes con usuario")
+        print("9. Salir")
         opcion = input("Opción: ").strip()
         
         if opcion == "1":
@@ -643,7 +660,28 @@ def mostrar_menu():
             nombre = input("Grupo destino: ").strip()
             texto  = input("Mensaje: ")
             enviar_mensaje_grupal(nombre, texto)
+            
         elif opcion == "8":
+            usuarios = list(usuarios_conectados.keys())
+            if not usuarios:
+                print("\nNo hay usuarios conectados para ver historial.")
+                continue
+                
+            print("\n=== USUARIOS DISPONIBLES ===")
+            for i, uid in enumerate(usuarios, 1):
+                estado = "ACTIVO" if (time.time() - usuarios_conectados[uid][1]) < TIEMPO_INACTIVIDAD/2 else "INACTIVO"
+                print(f"{i}. {uid.hex()[:8]} ({estado})")
+                
+            try:
+                idx = int(input("\nSeleccione usuario #: ")) - 1
+                if idx < 0 or idx >= len(usuarios):
+                    print("❌ Número inválido.")
+                    continue
+                mostrar_historial(usuarios[idx])
+            except ValueError:
+                print("❌ Entrada inválida. Ingresa un número válido.")
+                
+        elif opcion == "9":
             global tcp_server_running
             tcp_server_running = False
             print("\nSaliendo del programa...")
