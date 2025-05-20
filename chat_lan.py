@@ -224,7 +224,8 @@ def procesar_cuerpos():
                     historial_mensajes.setdefault(BROADCAST_ID, deque(maxlen=50)).append((hora, mensaje, 'recibido', user_id_from))
                 else:
                     historial_mensajes.setdefault(user_id_from, deque(maxlen=10)).append((hora, mensaje, 'recibido'))
-
+                    mensajes_recibidos.put((user_id_from, hora, mensaje, False, None))
+                    
             mensajes_recibidos.put((user_id_from, hora, mensaje, es_broadcast, nombre_grupo))
 
             if not es_broadcast and not nombre_grupo:
@@ -484,7 +485,6 @@ def enviar_mensaje(user_id_to, mensaje, es_broadcast=False):
                     historial_mensajes.setdefault(user_id_to, deque(maxlen=10)).append((hora, mensaje, 'enviado'))
             else:
                 print(f"❌ Error en respuesta al cuerpo: código {respuesta[0]}")
-            
     except Exception as e:
         print(f"❌ Excepción al enviar mensaje: {e}")
 
@@ -551,16 +551,44 @@ def mostrar_mensajes_auto():
 
 def mostrar_historial(user_id):
     with historial_lock:
-        if user_id not in historial_mensajes or not historial_mensajes[user_id]:
+        if user_id not in historial_mensajes:
             print("\nNo hay historial de mensajes con este usuario.")
             return
             
         print(f"\n=== ÚLTIMOS 10 MENSAJES CON {user_id.hex()[:8]} ===")
-        for hora, mensaje, tipo in list(historial_mensajes[user_id])[-10:]:  # Mostrar solo los últimos 10
+        for hora, mensaje, tipo in historial_mensajes[user_id]:  
             prefix = "Tú:" if tipo == 'enviado' else "Ell@:"
             print(f"[{hora}] {prefix} {mensaje}")
 
+def guardar_historial():
+    """Guarda solo mensajes personales en JSON"""
+    try:
+        with historial_lock:
+            historial_serializable = {
+                key.hex(): list(value) for key, value in historial_mensajes.items() 
+                if isinstance(key, bytes)  
+            }
+        
+        with open("historial_personal.json", "w") as f:
+            json.dump(historial_serializable, f)
+    except Exception as e:
+        print(f"⚠️ Error al guardar historial: {e}")
 
+def cargar_historial():
+    """Carga el historial personal desde JSON"""
+    try:
+        with open("historial_personal.json", "r") as f:
+            historial_cargado = json.load(f)
+        
+        with historial_lock:
+            for user_id_hex, mensajes in historial_cargado.items():
+                user_id = bytes.fromhex(user_id_hex)
+                historial_mensajes[user_id] = deque(mensajes, maxlen=10)
+    except FileNotFoundError:
+        print("🔍 No hay historial previo de mensajes personales.")
+    except Exception as e:
+        print(f"⚠️ Error al cargar historial: {e}")
+        
 def mostrar_menu():
     while True:
         print("\n=== MENÚ PRINCIPAL ===")
@@ -680,7 +708,6 @@ def mostrar_menu():
                 mostrar_historial(usuarios[idx])
             except ValueError:
                 print("❌ Entrada inválida. Ingresa un número válido.")
-                
         elif opcion == "9":
             global tcp_server_running
             tcp_server_running = False
@@ -690,8 +717,13 @@ def mostrar_menu():
             print("❌ Opción no válida. Intente nuevamente.")
 
 if __name__ == '__main__':
+    cargar_historial()
     print("Iniciando servicios...")
     iniciar_servicios()
     print("Servicios iniciados correctamente")
     print("El sistema ahora descubrirá usuarios automáticamente")
-    mostrar_menu()
+    try:
+        mostrar_menu()
+    finally:
+        guardar_historial() 
+    
