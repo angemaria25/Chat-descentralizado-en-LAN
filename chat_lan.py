@@ -154,17 +154,7 @@ def procesar_mensajes():
             mensaje_id = data[41]
             longitud = int.from_bytes(data[42:50], 'big')
             
-            if user_id_to == mi_id or user_id_to == BROADCAST_ID:
-                with mensaje_headers_lock:
-                    mensaje_headers[mensaje_id] = {
-                        'es_broadcast': user_id_to == BROADCAST_ID,
-                        'from': user_id_from
-                    }
-
-                respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
-                udp_socket.sendto(respuesta, addr)
-
-            elif op_code == MENSAJE_GRUPAL:
+            if op_code == MENSAJE_GRUPAL:
                 nombre_grupo = data[50:100].rstrip(b'\x00').decode('utf-8').strip().lower()
 
                 with grupos_lock:
@@ -179,6 +169,18 @@ def procesar_mensajes():
                     }
                 respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
                 udp_socket.sendto(respuesta, addr)
+            
+            elif op_code == MENSAJE:
+                if user_id_to == mi_id or user_id_to == BROADCAST_ID:
+                    with mensaje_headers_lock:
+                        mensaje_headers[mensaje_id] = {
+                            'es_broadcast': user_id_to == BROADCAST_ID,
+                            'from': user_id_from
+                        }
+
+                    respuesta = struct.pack('!B 20s 4s', OK, mi_id, b'\x00'*4)
+                    udp_socket.sendto(respuesta, addr)
+
         except Exception as e:
             print(f"[Error al procesar mensaje]: {e}")
             
@@ -537,11 +539,8 @@ def enviar_archivo(user_id_to, file_path):
 
 def mostrar_mensajes_auto():
     while True:
-        
         uid, hora, msg, es_broadcast, nombre_grupo = mensajes_recibidos.get()
-        if nombre_grupo:
-            print(f"👥 [Grupo {nombre_grupo}] {hora} - {uid.hex()[:8]}: {msg}")
-        elif es_broadcast:
+        if es_broadcast:
             print(f"📢 [Broadcast] {hora} - {uid.hex()[:8]}: {msg}")
         else:
             print(f"📩 [Privado] {hora} - {uid.hex()[:8]}: {msg}")
@@ -554,10 +553,10 @@ def mostrar_menu():
         print("2. Enviar mensaje a usuario")
         print("3. Enviar mensaje a todos (broadcast)")
         print("4. Enviar archivo a usuario")
-        print("5. Salir")
-        print("6. Crear grupo")
-        print("7. Unirse a grupo existente")
-        print("8. Enviar mensaje a grupo")
+        print("5. Crear grupo")
+        print("6. Unirse a grupo existente")
+        print("7. Enviar mensaje a grupo")
+        print("8. Salir")
         opcion = input("Opción: ").strip()
         
         if opcion == "1":
@@ -617,17 +616,12 @@ def mostrar_menu():
             except ValueError:
                 print("❌ Entrada inválida. Ingresa un número válido.")
         elif opcion == "5":
-            global tcp_server_running
-            tcp_server_running = False
-            print("\nSaliendo del programa...")
-            break
-        elif opcion == "6":
             nombre_grupo = input("Ingrese nombre del nuevo grupo: ").strip()
             if nombre_grupo:
                 crear_grupo(nombre_grupo)
             else:
                 print("❌ Nombre de grupo vacío.")
-        elif opcion == "7":
+        elif opcion == "6":
             with grupos_lock:
                 if not grupos_creados:
                     print("📭 No hay grupos disponibles.")
@@ -637,7 +631,7 @@ def mostrar_menu():
                         print(f" - {nombre}")
                     nombre_grupo = input("Ingresa el nombre del grupo al que deseas unirte: ").strip()
                     unirse_a_grupo(nombre_grupo)
-        elif opcion == "8":
+        elif opcion == "7":
             with grupos_lock:
                 if not grupos_creados:
                     print("📭 No hay grupos.")
@@ -649,6 +643,11 @@ def mostrar_menu():
             nombre = input("Grupo destino: ").strip()
             texto  = input("Mensaje: ")
             enviar_mensaje_grupal(nombre, texto)
+        elif opcion == "8":
+            global tcp_server_running
+            tcp_server_running = False
+            print("\nSaliendo del programa...")
+            break
         else:
             print("❌ Opción no válida. Intente nuevamente.")
 
